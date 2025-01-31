@@ -26,9 +26,15 @@ import {
     @Column('varchar', { length: 255, unique: true })
     @Index({ unique: true })
     email: string;
+
+    @Column('varchar', { length: 255 })
+    address: string; 
     
     @Column('int')
     documentNumber: number;
+
+    @Column('int')
+    numberOfVehicles: number;
     
     @Column('varchar', { length: 255 })
     vehicleLicesePlate: string;  

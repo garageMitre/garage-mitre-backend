@@ -14,9 +14,17 @@ export class CreateRenterDto {
     @IsNotEmpty()
     email: string;
 
+    @IsString()
+    @IsNotEmpty()
+    address: string;
+
     @IsNumber()
     @IsNotEmpty()
     documentNumber: number;
+
+    @IsNumber()
+    @IsNotEmpty()
+    numberOfVehicles: number;
 
     @IsString()
     @IsNotEmpty()
