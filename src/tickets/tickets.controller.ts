@@ -1,7 +1,6 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
 import { TicketsService } from './tickets.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
-import { UpdateTicketDto } from './dto/update-ticket.dto';
 
 @Controller('tickets')
 export class TicketsController {
@@ -12,28 +11,18 @@ export class TicketsController {
     return this.ticketsService.create(createTicketDto);
   }
 
-  @Get()
+  @Get('registrations')
   findAll() {
-    return this.ticketsService.findAll();
+    return this.ticketsService.findAllRegistrations();
   }
 
-  @Get(':id')
+  @Get('registrations/:id')
   findOne(@Param('id') id: string) {
-    return this.ticketsService.findOne(+id);
-  }
-
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateTicketDto: UpdateTicketDto) {
-    return this.ticketsService.update(+id, updateTicketDto);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.ticketsService.remove(+id);
+    return this.ticketsService.findOneRegistration(id);
   }
 
   @Post('simulation/:barId')
   createRegistrationPrueba(@Param('barId') simulatedCodeBar: string) {
-    return this.ticketsService.createRegistrationPrueba(simulatedCodeBar);
+    return this.ticketsService.createRegistration(simulatedCodeBar);
   }
 }

@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { CreateOwnerDto } from './dto/create-owner.dto';
 import { UpdateOwnerDto } from './dto/update-owner.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Owner } from './entities/owner.entity';
+import { FilterOperator, paginate, Paginated, PaginateQuery } from 'nestjs-paginate';
 
 @Injectable()
 export class OwnersService {
@@ -24,19 +25,77 @@ export class OwnersService {
     }
   }
 
-  findAll() {
-    return `This action returns all owners`;
+
+  async findAll(query: PaginateQuery): Promise<Paginated<Owner>> {
+    try {
+      return await paginate(query, this.ownerRepository, {
+        sortableColumns: ['id', 'firstName', 'email'],
+        nullSort: 'last',
+        defaultSortBy: [['createdAt', 'DESC']],
+        searchableColumns: ['firstName', 'email'],
+        filterableColumns: {
+          firstName: [FilterOperator.ILIKE, FilterOperator.EQ],
+          email: [FilterOperator.EQ, FilterOperator.ILIKE],
+        },
+      });
+    } catch (error) {
+      this.logger.error(error.message, error.stack);
+    }
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} owner`;
+  async findOne(id: string) {
+    try{
+      const owner = await this.ownerRepository.findOne({where:{id:id}})
+
+      if(!owner){
+        throw new NotFoundException('Owner not found')
+      }
+
+      return owner;
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) {
+        this.logger.error(error.message, error.stack);
+      }
+      throw error;
+    }
   }
 
-  update(id: number, updateOwnerDto: UpdateOwnerDto) {
-    return `This action updates a #${id} owner`;
+  async update(id: string, updateOwnerDto: UpdateOwnerDto) {
+    try{
+      const owner = await this.ownerRepository.findOne({where:{id:id}})
+
+      if(!owner){
+        throw new NotFoundException('Owner not found')
+      }
+
+      const updateOwner = this.ownerRepository.merge(owner, updateOwnerDto);
+      const savedOwner = await this.ownerRepository.save(updateOwner);
+
+      return savedOwner;
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) {
+        this.logger.error(error.message, error.stack);
+      }
+      throw error;
+    }
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} owner`;
+  async remove(id: string) {
+    try{
+      const owner = await this.ownerRepository.findOne({where:{id:id}})
+
+      if(!owner){
+        throw new NotFoundException('Owner not found')
+      }
+
+      await this.ownerRepository.remove(owner);
+
+      return {message: 'Owner removed successfully'}
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) {
+        this.logger.error(error.message, error.stack);
+      }
+      throw error;
+    }
   }
 }

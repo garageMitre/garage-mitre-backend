@@ -47,12 +47,11 @@ export class BoxListsService {
 
   async findBoxByDate(date: Date): Promise<BoxList | null> {
     try {
-      // Formatea la fecha para comparar solo día, mes y año (ignora la hora)
       const formattedDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   
       const boxList = await this.boxListRepository.findOne({
         where: { date: formattedDate },
-        relations: ['ticketRegistrations'], // Incluye las relaciones necesarias
+        relations: ['ticketRegistrations'],
       });
   
       return boxList || null;

@@ -4,12 +4,13 @@ import { TicketsController } from './tickets.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Ticket } from './entities/ticket.entity';
 import { TicketRegistration } from './entities/ticket-registration.entity';
-import { ScannerModule } from 'src/scanner/scanner.module';
 import { BoxListsModule } from 'src/box-lists/box-lists.module';
+import { TicketGateway } from './register-gateway';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Ticket, TicketRegistration]), ScannerModule, BoxListsModule],
+  imports: [TypeOrmModule.forFeature([Ticket, TicketRegistration]), BoxListsModule],
   controllers: [TicketsController],
-  providers: [TicketsService],
+  providers: [TicketsService, TicketGateway],
+  exports: [TicketsService]
 })
 export class TicketsModule {}

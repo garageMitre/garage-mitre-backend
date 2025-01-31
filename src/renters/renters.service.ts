@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { CreateRenterDto } from './dto/create-renter.dto';
 import { UpdateRenterDto } from './dto/update-renter.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Renter } from './entities/renter.entity';
+import { FilterOperator, paginate, Paginated, PaginateQuery } from 'nestjs-paginate';
 
 @Injectable()
 export class RentersService {
@@ -25,19 +26,76 @@ export class RentersService {
     }
   }
 
-  findAll() {
-    return `This action returns all renters`;
+  async findAll(query: PaginateQuery): Promise<Paginated<Renter>> {
+    try {
+      return await paginate(query, this.renterRepository, {
+        sortableColumns: ['id', 'firstName', 'email'],
+        nullSort: 'last',
+        defaultSortBy: [['createdAt', 'DESC']],
+        searchableColumns: ['firstName', 'email'],
+        filterableColumns: {
+          firstName: [FilterOperator.ILIKE, FilterOperator.EQ],
+          email: [FilterOperator.EQ, FilterOperator.ILIKE],
+        },
+      });
+    } catch (error) {
+      this.logger.error(error.message, error.stack);
+    }
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} renter`;
+  async findOne(id: string) {
+    try{
+      const renter = await this.renterRepository.findOne({where:{id:id}})
+
+      if(!renter){
+        throw new NotFoundException('Renter not found')
+      }
+
+      return renter;
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) {
+        this.logger.error(error.message, error.stack);
+      }
+      throw error;
+    }
   }
 
-  update(id: number, updateRenterDto: UpdateRenterDto) {
-    return `This action updates a #${id} renter`;
+  async update(id: string, updateRenterDto: UpdateRenterDto) {
+    try{
+      const renter = await this.renterRepository.findOne({where:{id:id}})
+
+      if(!renter){
+        throw new NotFoundException('Renter not found')
+      }
+
+      const updateRenter = this.renterRepository.merge(renter, updateRenterDto);
+      const savedRenter = await this.renterRepository.save(updateRenter);
+
+      return savedRenter;
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) {
+        this.logger.error(error.message, error.stack);
+      }
+      throw error;
+    }
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} renter`;
+  async remove(id: string) {
+    try{
+      const renter = await this.renterRepository.findOne({where:{id:id}})
+
+      if(!renter){
+        throw new NotFoundException('Renter not found')
+      }
+
+      await this.renterRepository.remove(renter);
+
+      return { message: 'Renter removed successfully' };
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) {
+        this.logger.error(error.message, error.stack);
+      }
+      throw error;
+    }
   }
 }

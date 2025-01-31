@@ -1,5 +1,6 @@
 import {
   Column,
+  CreateDateColumn,
   Entity,
   JoinColumn,
   ManyToOne,
@@ -42,5 +43,8 @@ export class TicketRegistration {
 
   @ManyToOne(() => BoxList, (boxList) => boxList.ticketRegistrations, {onDelete: 'CASCADE'})
   boxList: BoxList;
+
+  @CreateDateColumn()
+  createdAt: Date;
 
 }
