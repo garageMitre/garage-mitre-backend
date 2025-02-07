@@ -5,6 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Renter } from './entities/renter.entity';
 import { FilterOperator, paginate, Paginated, PaginateQuery } from 'nestjs-paginate';
+import { ReceiptsService } from 'src/receipts/receipts.service';
 
 @Injectable()
 export class RentersService {
@@ -13,12 +14,16 @@ export class RentersService {
     constructor(
       @InjectRepository(Renter)
       private readonly renterRepository: Repository<Renter>,
+      private readonly receiptsService: ReceiptsService
+      
     ) {}
 
   async create(createRenterDto: CreateRenterDto) {
     try{
       const renter = this.renterRepository.create(createRenterDto);
       const savedRenter = await this.renterRepository.save(renter);
+
+      await this.receiptsService.createByRenter(renter.id)
       
       return savedRenter;
     } catch (error) {
@@ -45,7 +50,10 @@ export class RentersService {
 
   async findOne(id: string) {
     try{
-      const renter = await this.renterRepository.findOne({where:{id:id}})
+      const renter = await this.renterRepository.findOne({
+        where:{id:id},
+        relations: ['receipts']
+      })
 
       if(!renter){
         throw new NotFoundException('Renter not found')

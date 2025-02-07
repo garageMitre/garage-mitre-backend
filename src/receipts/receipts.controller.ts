@@ -1,26 +1,35 @@
-import { Controller, Post, Body, Res } from '@nestjs/common';
+import { Controller, Get, Param, Post, Body, Patch } from '@nestjs/common';
 import { ReceiptsService } from './receipts.service';
-import { Response } from 'express';
 
-@Controller('recibos')
+@Controller('receipts')
 export class ReceiptsController {
-  constructor(private readonly reciboService: ReceiptsService) {}
-
-  @Post('generar')
-  async generarRecibo(@Body() data: any, @Res() res: Response) {
-    const filePath = `./recibos/recibo-${Date.now()}.pdf`;
-
-    try {
-      await this.reciboService.generarRecibo(data, filePath);
-
-      res.set({
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename=recibo.pdf`,
-      });
-      res.sendFile(filePath, { root: '.' });
-    } catch (error) {
-      console.error('Error al generar el recibo:', error);
-      res.status(500).send('Error al generar el recibo');
+    constructor(private readonly receiptsService: ReceiptsService) {}
+ 
+    @Patch('owners/:ownerId')
+    async updateByOwner(
+        @Param('ownerId') ownerId: string
+    ) {
+        return await this.receiptsService.updateByOwner(ownerId);
     }
-  }
+
+    @Patch('cancelReceipt/owners/:ownerId')
+    async cancelReceiptByOwner(
+        @Param('ownerId') ownerId: string
+    ) {
+        return await this.receiptsService.cancelReceiptByOwner(ownerId);
+    }
+
+    @Patch('renters/:renterId')
+    async updateByRenter(
+        @Param('renterId') renterId: string
+    ) {
+        return await this.receiptsService.updateByRenter(renterId);
+    }
+
+    @Patch('cancelReceipt/renters/:renterId')
+    async cancelReceiptByRenter(
+        @Param('renterId') renterId: string
+    ) {
+        return await this.receiptsService.cancelReceiptByRenter(renterId);
+    }
 }

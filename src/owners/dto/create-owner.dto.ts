@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsNumber, IsString } from "class-validator";
+import { IsArray, IsNotEmpty, IsNumber, IsString } from "class-validator";
 
 export class CreateOwnerDto {
 
@@ -26,12 +26,12 @@ export class CreateOwnerDto {
         @IsNotEmpty()
         numberOfVehicles: number;
     
-        @IsString()
+        @IsArray()
         @IsNotEmpty()
-        vehicleLicesePlate: string
+        vehicleLicensePlates: string[];
     
-        @IsString()
+        @IsArray()
         @IsNotEmpty()
-        vehicleBrand: string;
+        vehicleBrands: string[];
 }
 

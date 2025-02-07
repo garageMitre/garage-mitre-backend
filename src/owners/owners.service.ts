@@ -5,6 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Owner } from './entities/owner.entity';
 import { FilterOperator, paginate, Paginated, PaginateQuery } from 'nestjs-paginate';
+import { ReceiptsService } from 'src/receipts/receipts.service';
 
 @Injectable()
 export class OwnersService {
@@ -13,15 +14,19 @@ export class OwnersService {
     constructor(
       @InjectRepository(Owner)
       private readonly ownerRepository: Repository<Owner>,
+      private readonly receiptsService: ReceiptsService
     ) {}
   async create(createOwnerDto: CreateOwnerDto) {
     try{
       const owner = this.ownerRepository.create(createOwnerDto);
       const savedOwner = await this.ownerRepository.save(owner);
+
+      await this.receiptsService.createByOwner(owner.id)
       
       return savedOwner;
     } catch (error) {
       this.logger.error(error.message, error.stack);
+      throw error;
     }
   }
 
@@ -45,7 +50,10 @@ export class OwnersService {
 
   async findOne(id: string) {
     try{
-      const owner = await this.ownerRepository.findOne({where:{id:id}})
+      const owner = await this.ownerRepository.findOne({
+        where:{id:id},
+        relations:['receipts']
+      })
 
       if(!owner){
         throw new NotFoundException('Owner not found')

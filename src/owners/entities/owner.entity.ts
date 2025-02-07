@@ -6,11 +6,13 @@ import {
     Index,
     JoinColumn,
     ManyToOne,
+    OneToMany,
     OneToOne,
     PrimaryGeneratedColumn,
     UpdateDateColumn,
   } from 'typeorm';
   import { BoxList } from 'src/box-lists/entities/box-list.entity';
+import { ReceiptOwner } from 'src/receipts/entities/receipt-owner.entity';
   
   @Entity({ name: 'owners' })
   export class Owner {
@@ -36,12 +38,18 @@ import {
     @Column('int')
     numberOfVehicles: number;
     
-    @Column('varchar', { length: 255 })
-    vehicleLicesePlate: string;  
-
-    @Column('varchar', { length: 255 })
-    vehicleBrand: string;  
+    @Column('simple-array', { nullable: true })
+    vehicleLicensePlates: string[];
+  
+    @Column('simple-array', { nullable: true })
+    vehicleBrands: string[];
     
+    @ManyToOne(() => BoxList, (boxList) => boxList.owners)
+    boxList: BoxList;
+
+    @OneToMany(() => ReceiptOwner, (receipts) => receipts.owner, {cascade: true})
+    receipts: ReceiptOwner[];
+  
     @DeleteDateColumn()
     deletedAt: Date;
   
@@ -50,9 +58,6 @@ import {
   
     @UpdateDateColumn()
     updatedAt: Date;
-  
-    @ManyToOne(() => BoxList, (boxList) => boxList.renters)
-    boxList: BoxList;
   
   }
   
