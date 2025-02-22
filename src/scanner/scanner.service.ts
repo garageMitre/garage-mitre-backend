@@ -26,7 +26,7 @@ export class ScannerService {
         return { success: false, message: `No se encontró un ticket con el código: ${scannerDto.barCode}` };
       }
 
-      const registration = await this.ticketsService.createRegistration(scannerDto.barCode, ticket.id);
+      const registration = await this.ticketsService.createRegistration(ticket.id);
 
       if (registration) {
         this.logger.log('Registro creado exitosamente.');

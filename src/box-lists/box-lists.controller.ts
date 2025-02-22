@@ -1,16 +1,23 @@
-import { Controller, Get, Post, Put, Body, Param, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, NotFoundException, UseGuards } from '@nestjs/common';
 import { BoxListsService } from './box-lists.service';
 import { CreateBoxListDto } from './dto/create-box-list.dto';
 import { UpdateBoxListDto } from './dto/update-box-list.dto';
+import { CreateOtherPaymentDto } from './dto/create-other-payment.dto';
+import { AuthOrTokenAuthGuard } from 'src/utils/guards/auth-or-token.guard';
 
 @Controller('box-lists')
+@UseGuards(AuthOrTokenAuthGuard)
 export class BoxListsController {
   constructor(private readonly boxListsService: BoxListsService) {}
 
   @Post()
   async createBox(@Body() createBoxListDto: CreateBoxListDto) {
-    const createdBoxList = await this.boxListsService.createBox(createBoxListDto);
-    return { message: 'BoxList created successfully', data: createdBoxList };
+    return await this.boxListsService.createBox(createBoxListDto);
+  }
+
+  @Get()
+  async getAllboxes() {
+      return await this.boxListsService.getAllboxes();
   }
 
   @Get(':id')
@@ -20,8 +27,7 @@ export class BoxListsController {
 
   @Put(':id')
   async updateBox(@Param('id') id: string, @Body() updateBoxListDto: UpdateBoxListDto) {
-    const updatedBoxList = await this.boxListsService.updateBox(id, updateBoxListDto);
-    return { message: 'BoxList updated successfully', data: updatedBoxList };
+    return await this.boxListsService.updateBox(id, updateBoxListDto);
   }
 
   @Get('date/:date')
@@ -37,6 +43,11 @@ export class BoxListsController {
     }
 
     return { message: 'BoxList found', data: boxList };
+  }
+
+  @Post('otherPayment')
+  async createOtherPayment(@Body() createOtherPaymentDto: CreateOtherPaymentDto) {
+    return await this.boxListsService.createOtherPayment(createOtherPaymentDto);
   }
 
 

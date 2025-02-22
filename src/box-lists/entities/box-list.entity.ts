@@ -1,6 +1,5 @@
-import { Exclude } from 'class-transformer';
-import { Owner } from 'src/owners/entities/owner.entity';
-import { Renter } from 'src/renters/entities/renter.entity';
+
+import { Receipt } from 'src/receipts/entities/receipt.entity';
 import { TicketRegistration } from 'src/tickets/entities/ticket-registration.entity';
 import {
   Column,
@@ -9,24 +8,29 @@ import {
   OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import { OtherPayment } from './other-payment.entity';
+import { TicketRegistrationForDay } from 'src/tickets/entities/ticket-registration-for-day.entity';
 
 @Entity({ name: 'box_lists' })
 export class BoxList {
   @PrimaryGeneratedColumn('uuid')
   id: string;
   
-  @Column('date', { nullable: true })
+  @Column('date')
   date: Date | null;
 
-  @Column('int', { nullable: true })
+  @Column('int')
   totalPrice: number;
 
   @OneToMany(() => TicketRegistration, (ticketRegistration) => ticketRegistration.boxList, { cascade: true })
   ticketRegistrations: TicketRegistration[];
 
-  @OneToMany(() => Renter, (renters) => renters.boxList)
-  renters: Renter[];
+  @OneToMany(() => TicketRegistrationForDay, (ticketRegistrationForDays) => ticketRegistrationForDays.boxList, { cascade: true })
+  ticketRegistrationForDays: TicketRegistrationForDay[];
 
-  @OneToMany(() => Owner, (owners) => owners.boxList)
-  owners: Owner[];
+  @OneToMany(() => Receipt, (receipts) => receipts.boxList)
+  receipts: Receipt[];
+
+  @OneToMany(() => OtherPayment, (otherPayments) => otherPayments.boxList)
+  otherPayments: OtherPayment[];
 }

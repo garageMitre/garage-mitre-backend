@@ -11,6 +11,10 @@ import { BoxListsService } from 'src/box-lists/box-lists.service';
 import { CreateTicketRegistrationDto } from './dto/create-ticket-registration.dto';
 import { BoxList } from 'src/box-lists/entities/box-list.entity';
 import { TicketGateway } from './register-gateway';
+import { UpdateTicketRegistrationDto } from './dto/update-ticket-registration.dto';
+import { FilterOperator, paginate, Paginated, PaginateQuery } from 'nestjs-paginate';
+import { CreateTicketRegistrationForDayDto } from './dto/create-ticket-registration-for-day.dto';
+import { TicketRegistrationForDay } from './entities/ticket-registration-for-day.entity';
 
 @Injectable()
 export class TicketsService {
@@ -21,6 +25,8 @@ export class TicketsService {
     private readonly ticketRepository: Repository<Ticket>,
     @InjectRepository(TicketRegistration)
     private readonly ticketRegistrationRepository: Repository<TicketRegistration>,
+    @InjectRepository(TicketRegistrationForDay)
+    private readonly ticketRegistrationForDayRepository: Repository<TicketRegistrationForDay>,
     private readonly boxListsService: BoxListsService,
     private readonly ticketGateway: TicketGateway,
   ) {}
@@ -36,6 +42,62 @@ export class TicketsService {
     }
   }
 
+    async findAll(query: PaginateQuery): Promise<Paginated<Ticket>> {
+      try {
+        return await paginate(query, this.ticketRepository, {
+          sortableColumns: ['id'],
+          nullSort: 'last',
+          searchableColumns: ['codeBar', 'vehicleType'],
+          filterableColumns: {
+            codeBar: [FilterOperator.ILIKE, FilterOperator.EQ],
+            vehicleType: [FilterOperator.EQ, FilterOperator.ILIKE],
+          },
+        });
+      } catch (error) {
+        this.logger.error(error.message, error.stack);
+      }
+    }
+
+  async update(id: string, updateTicketDto: UpdateTicketDto) {
+    try{
+      const ticket = await this.ticketRepository.findOne({where:{id:id}})
+
+      if(!ticket){
+        throw new NotFoundException('Ticket not found')
+      }
+      
+      const updateTicket = this.ticketRepository.merge(ticket, updateTicketDto);
+
+      const savedTicket = await this.ticketRepository.save(updateTicket); 
+
+      return savedTicket;
+    } catch (error) {
+        if (!(error instanceof NotFoundException)) {
+          this.logger.error(error.message, error.stack);
+        }
+        throw error;
+      }
+  }
+
+  async remove(id: string) {
+    try{
+      const ticket = await this.ticketRepository.findOne({where:{id:id}})
+
+      if(!ticket){
+        throw new NotFoundException('Ticket list not found')
+      }
+
+      await this.ticketRepository.remove(ticket);
+
+      return {message: 'Ticket list removed successfully'}
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) {
+        this.logger.error(error.message, error.stack);
+      }
+      throw error;
+    }
+  }
+
   async findTicketByCode (codeBar: string){
     const ticket = await this.ticketRepository.findOne({ where: { codeBar:codeBar } });
     if (!ticket) {
@@ -45,7 +107,7 @@ export class TicketsService {
     return ticket;
   }
 
-  async createRegistration(simulatedCodeBar?: string, ticketId?: string) {
+  async createRegistration(ticketId?: string) {
     try {
 
         const ticket = await this.ticketRepository.findOne({ where: { id: ticketId } });
@@ -99,6 +161,37 @@ export class TicketsService {
     }
 }
 
+async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRegistrationForDayDto) {
+  try {
+    const ticket = this.ticketRegistrationForDayRepository.create(createTicketRegistrationForDayDto);
+    ticket.description = `Tipo: Dia/s, Tiempo: ${ticket.days} Dia/s`
+    const now = new Date();
+    const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const boxListDate = formattedDay;
+    let boxList = await this.boxListsService.findBoxByDate(boxListDate);
+
+    if (!boxList) {
+        boxList = await this.boxListsService.createBox({
+            date: boxListDate,
+            totalPrice: ticket.price
+        });
+    } else {
+        boxList.totalPrice += ticket.price;
+
+        await this.boxListsService.updateBox(boxList.id, {
+            totalPrice: boxList.totalPrice,
+        });
+    }
+
+    ticket.boxList = { id: boxList.id } as BoxList;
+    const savedTicket = await this.ticketRegistrationForDayRepository.save(ticket);
+    return savedTicket;
+  } catch (error) {
+      this.logger.error(error.message, error.stack);
+  }
+}
+
+
 async updateRegistration(existingRegistration: TicketRegistration, now: Date, formattedDay: Date, ticket: Ticket) {
     try {
         const getLocalTime = (date: Date): string => {
@@ -123,10 +216,10 @@ async updateRegistration(existingRegistration: TicketRegistration, now: Date, fo
         const diffMinutes = departureMinutes - entryMinutes;
         const hours = Math.ceil((diffMinutes - 5) / 60);
 
-        const price = diffMinutes < 5 ? 0 : Math.max(hours, 1) * 600;
+        const price = diffMinutes < 5 ? 0 : Math.max(hours, 1) * ticket.amount;
 
-        const updateTicketRegistrationDto: CreateTicketRegistrationDto = {
-            description: `Tipo ${existingRegistration.ticket.vehicleType}, Ent: ${existingRegistration.entryTime}, Sal: ${localTime}`,
+        const updateTicketRegistrationDto: UpdateTicketRegistrationDto = {
+            description: `Tipo: ${existingRegistration.ticket.vehicleType}, Ent: ${existingRegistration.entryTime}, Sal: ${localTime}`,
             price: price,
             entryDay: existingRegistration.entryDay,
             entryTime: existingRegistration.entryTime,

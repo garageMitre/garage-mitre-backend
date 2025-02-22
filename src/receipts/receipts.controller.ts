@@ -1,35 +1,21 @@
-import { Controller, Get, Param, Post, Body, Patch } from '@nestjs/common';
+import { Controller, Get, Param, Post, Body, Patch, UseGuards } from '@nestjs/common';
 import { ReceiptsService } from './receipts.service';
 
 @Controller('receipts')
 export class ReceiptsController {
     constructor(private readonly receiptsService: ReceiptsService) {}
  
-    @Patch('owners/:ownerId')
+    @Patch('customers/:customerId')
     async updateByOwner(
-        @Param('ownerId') ownerId: string
+        @Param('customerId') customerId: string
     ) {
-        return await this.receiptsService.updateByOwner(ownerId);
+        return await this.receiptsService.updateReceipt(customerId);
     }
 
-    @Patch('cancelReceipt/owners/:ownerId')
+    @Patch('cancelReceipt/customers/:customerId')
     async cancelReceiptByOwner(
-        @Param('ownerId') ownerId: string
+        @Param('customerId') customerId: string
     ) {
-        return await this.receiptsService.cancelReceiptByOwner(ownerId);
-    }
-
-    @Patch('renters/:renterId')
-    async updateByRenter(
-        @Param('renterId') renterId: string
-    ) {
-        return await this.receiptsService.updateByRenter(renterId);
-    }
-
-    @Patch('cancelReceipt/renters/:renterId')
-    async cancelReceiptByRenter(
-        @Param('renterId') renterId: string
-    ) {
-        return await this.receiptsService.cancelReceiptByRenter(renterId);
+        return await this.receiptsService.cancelReceipt(customerId);
     }
 }

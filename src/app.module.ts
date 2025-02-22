@@ -9,8 +9,11 @@ import { ReceiptsModule } from './receipts/receipts.module';
 import { ScannerModule } from './scanner/scanner.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { BoxListsModule } from './box-lists/box-lists.module';
-import { RentersModule } from './renters/renters.module';
-import { OwnersModule } from './owners/owners.module';
+import { CustomersModule } from './customers/customers.module';
+import { PrinterModule } from './printer/printer.module';
+import { UsersModule } from './users/users.module';
+import { AuthModule } from './auth/auth.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [ConfigModule.forRoot({
@@ -25,13 +28,16 @@ import { OwnersModule } from './owners/owners.module';
     }),
     inject: [ConfigService],
   }),
+  ScheduleModule.forRoot(),
   ImagesModule,
   ReceiptsModule,
   ScannerModule,
   TicketsModule,
   BoxListsModule,
-  RentersModule,
-  OwnersModule
+  CustomersModule,
+  PrinterModule,
+  UsersModule,
+  AuthModule
 ],
   controllers: [],
   providers: [],

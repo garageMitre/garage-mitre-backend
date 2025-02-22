@@ -18,9 +18,8 @@ import {
     handleDisconnect(client: Socket) {
     }
   
-    // Método para emitir un evento al cliente
     emitNewRegistration(data: any) {
-      this.server.emit('new-registration', data); // Evento "new-registration"
+      this.server.emit('new-registration', data);
     }
   }
   

@@ -9,20 +9,15 @@ import {
 } from 'typeorm';
 import { Ticket } from './ticket.entity';
 import { BoxList } from 'src/box-lists/entities/box-list.entity';
-import { Exclude } from 'class-transformer';
-
-export const TICKET_TYPE = ['AUTO', 'CAMIONETA', 'MOTO'] as const;
-export type TicketType = (typeof TICKET_TYPE)[number];
-
 @Entity({ name: 'ticket_registrations' })
 export class TicketRegistration {
   @PrimaryGeneratedColumn('uuid')
   id: string;
   
-  @Column('varchar', { length: 255, nullable: true })
+  @Column('varchar', { length: 255 })
   description: string;
 
-  @Column('int', {nullable: true})
+  @Column('int')
   price: number;
   
   @Column('date', { nullable: true })

@@ -16,6 +16,9 @@ export class Ticket {
   
   @Column('varchar', { length: 255 })
   codeBar: string;
+
+  @Column('int',)
+  amount: number;
   
   @Column('enum', { enum: TICKET_TYPE})
   vehicleType: TicketType;

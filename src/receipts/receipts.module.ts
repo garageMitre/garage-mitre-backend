@@ -2,13 +2,12 @@ import { Module } from '@nestjs/common';
 import { ReceiptsService } from './receipts.service';
 import { ReceiptsController } from './receipts.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ReceiptOwner } from './entities/receipt-owner.entity';
-import { Owner } from 'src/owners/entities/owner.entity';
-import { Renter } from 'src/renters/entities/renter.entity';
-import { ReceiptRenter } from './entities/receipt-renter.entity';
+import { BoxListsModule } from 'src/box-lists/box-lists.module';
+import { Customer } from 'src/customers/entities/customer.entity';
+import { Receipt } from './entities/receipt.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ReceiptOwner, ReceiptRenter, Owner, Renter])],
+  imports: [TypeOrmModule.forFeature([Customer, Receipt]), BoxListsModule],
   controllers: [ReceiptsController],
   providers: [ReceiptsService],
   exports: [ReceiptsService]

@@ -1,5 +1,4 @@
 import { IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Matches } from "class-validator";
-import { TICKET_TYPE, TicketType } from "../entities/ticket.entity";
 
 export class CreateTicketRegistrationDto {
 
