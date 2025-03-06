@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AppConfig, DatabaseConfig } from './config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ImagesModule } from './images/images.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { ReceiptsModule } from './receipts/receipts.module';
@@ -29,7 +28,6 @@ import { ScheduleModule } from '@nestjs/schedule';
     inject: [ConfigService],
   }),
   ScheduleModule.forRoot(),
-  ImagesModule,
   ReceiptsModule,
   ScannerModule,
   TicketsModule,
