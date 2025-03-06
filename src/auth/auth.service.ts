@@ -15,6 +15,7 @@ import { CreatePasswordResetTokenDto } from './dto/create-password-reset-token.d
 import { CreateVerificationTokenDto } from './dto/create-verification-token.dto';
 import { UsersService } from 'src/users/users.service';
 import { CustomUnauthorizedException } from 'src/libs/helpers/custom-excepcions';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class AuthService {
