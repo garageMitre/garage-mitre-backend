@@ -1,21 +1,6 @@
 version: '3.8'
 
 services:
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: nest_app
-    restart: always
-    depends_on:
-      - db
-    ports:
-      - "3000:3000"
-    environment:
-      DATABASE_URL: "postgresql://admin:admin@db:5432/estacionamiento"
-    volumes:
-      - .:/app
-
   db:
     image: postgres:16.2
     restart: always
