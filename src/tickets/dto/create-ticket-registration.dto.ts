@@ -27,4 +27,9 @@ export class CreateTicketRegistrationDto {
     @IsString()
     @IsNotEmpty()
     departureTime: string
+
+    @IsString()
+    @IsOptional()
+    @Matches(/^\d{4}-\d{2}-\d{2}$/)
+    dateNow: Date
 }

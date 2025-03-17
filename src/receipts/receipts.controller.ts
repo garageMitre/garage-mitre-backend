@@ -1,5 +1,6 @@
 import { Controller, Get, Param, Post, Body, Patch, UseGuards } from '@nestjs/common';
 import { ReceiptsService } from './receipts.service';
+import { UpdateReceiptDto } from './dto/update-receipt.dto';
 
 @Controller('receipts')
 export class ReceiptsController {
@@ -7,9 +8,10 @@ export class ReceiptsController {
  
     @Patch('customers/:customerId')
     async updateByOwner(
-        @Param('customerId') customerId: string
+        @Param('customerId') customerId: string,
+        @Body() updateReceiptDto : UpdateReceiptDto
     ) {
-        return await this.receiptsService.updateReceipt(customerId);
+        return await this.receiptsService.updateReceipt(customerId, updateReceiptDto);
     }
 
     @Patch('cancelReceipt/customers/:customerId')

@@ -143,6 +143,7 @@ export class TicketsService {
                 entryTime: localTime,
                 departureDay: null,
                 departureTime: null,
+                dateNow: null
             };
 
             const newRegistration = this.ticketRegistrationRepository.create({
@@ -164,9 +165,10 @@ export class TicketsService {
 async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRegistrationForDayDto) {
   try {
     const ticket = this.ticketRegistrationForDayRepository.create(createTicketRegistrationForDayDto);
-    ticket.description = `Tipo: Dia/s, Tiempo: ${ticket.days} Dia/s`
+    ticket.description = `Tipo: Dia/s, Tiempo: ${ticket.hours} Horas`
     const now = new Date();
     const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    ticket.dateNow = formattedDay;
     const boxListDate = formattedDay;
     let boxList = await this.boxListsService.findBoxByDate(boxListDate);
 
@@ -216,7 +218,15 @@ async updateRegistration(existingRegistration: TicketRegistration, now: Date, fo
         const diffMinutes = departureMinutes - entryMinutes;
         const hours = Math.ceil((diffMinutes - 5) / 60);
 
-        const price = diffMinutes < 5 ? 0 : Math.max(hours, 1) * ticket.amount;
+        const isNightTime = departureMinutes < 360 || departureMinutes >= 1140;
+
+        const pricePerHour = isNightTime ? ticket.nightPrice : ticket.dayPrice;
+
+        ticket.price = pricePerHour;
+
+       await this.ticketRepository.save(ticket)
+    
+        const price = diffMinutes < 5 ? 0 : Math.max(hours, 1) * ticket.price;
 
         const updateTicketRegistrationDto: UpdateTicketRegistrationDto = {
             description: `Tipo: ${existingRegistration.ticket.vehicleType}, Ent: ${existingRegistration.entryTime}, Sal: ${localTime}`,
@@ -225,6 +235,7 @@ async updateRegistration(existingRegistration: TicketRegistration, now: Date, fo
             entryTime: existingRegistration.entryTime,
             departureDay: formattedDay,
             departureTime: localTime,
+            dateNow: formattedDay
         };
 
         const updatedRegistration = this.ticketRegistrationRepository.create({

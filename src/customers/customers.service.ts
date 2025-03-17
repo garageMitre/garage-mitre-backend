@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { CreateCustomerDto, CreateVehicleDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -14,6 +14,7 @@ import { CreateInterestSettingDto } from './dto/interest-setting.dto';
 import { Cron } from '@nestjs/schedule';
 import { isUUID } from 'class-validator';
 import { InterestCustomer } from './entities/interest-customer.entity';
+import { UpdateAmountAllCustomerDto } from './dto/update-amount-all-customers.dto';
 
 @Injectable()
 export class CustomersService {
@@ -35,6 +36,13 @@ export class CustomersService {
 
     async create(createCustomerDto: CreateCustomerDto) {
       try {
+        const existingCustomerEmail = await this.customerRepository.findOne({
+          where: { email: createCustomerDto.email },
+        });
+  
+        if (existingCustomerEmail) {
+          throw new ConflictException('email already exists');
+        }
 
         const customer = this.customerRepository.create({
           ...createCustomerDto,
@@ -92,6 +100,13 @@ export class CustomersService {
       if (!customer) {
         throw new NotFoundException(`Customer not found`);
       }
+  
+      // Ordenar los receipts para que "PENDING" siempre esté al final
+      customer.receipts = customer.receipts.sort((a, b) => {
+        if (a.status === 'PENDING' && b.status !== 'PENDING') return 1;
+        if (a.status !== 'PENDING' && b.status === 'PENDING') return -1;
+        return new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime(); // Ordenar por fecha descendente
+      });
   
       return customer;
     } catch (error) {
@@ -216,10 +231,24 @@ export class CustomersService {
       throw error;
     }
   }
+
+  async findInterest() {
+    try {
+      const latestInterest = await this.interestSettingsRepository.find({
+        order: { updatedAt: 'DESC' },
+        take: 1,
+      });
+      
+      return latestInterest // Retorna el primer elemento si existe
+    } catch (error) {
+      this.logger.error(`Error al buscar el interés: ${error.message}`);
+      throw error;
+    }
+  }
   
 
 
-  @Cron('0 8 1,10,20,28,30 * *') // Todos los dias 1,10,30 de cada mes (28 de febrero) a las 8am
+  @Cron('0 8 1,10,20,28,30 * *') // Todos los dias 1,10,30 de cada mes (28 de febrero) a las 8am '0 8 1,10,20,28,30 * *' */1 * * * *
   async updateInterests() {
     try {
       const today = new Date();
@@ -236,6 +265,7 @@ export class CustomersService {
         order: { updatedAt: 'DESC' },
         take: 1,
       });
+      console.log(latestInterest)
   
       if (!latestInterest || latestInterest.length === 0) {
         this.logger.error(`No hay configuración de intereses registrada. Cancelando tarea.`);
@@ -284,6 +314,42 @@ export class CustomersService {
       this.logger.error('Error al actualizar intereses', error.stack);
     }
   }
-   
+
+  async updateAmount(updateAmountAllCustomerDto: UpdateAmountAllCustomerDto) {
+    try {
+        // Obtener todos los clientes del tipo especificado con sus vehículos
+        const customers = await this.customerRepository.find({
+            where: { customerType: updateAmountAllCustomerDto.customerType },
+            relations: ['vehicles']
+        });
+
+        if (!customers.length) {
+            throw new NotFoundException(`No se encontraron clientes de tipo ${updateAmountAllCustomerDto.customerType}`);
+        }
+
+        // Iterar sobre cada cliente y actualizar el monto de sus vehículos
+        for (const customer of customers) {
+            for (const vehicle of customer.vehicles) {
+                vehicle.amount += updateAmountAllCustomerDto.amount;
+            }
+            // Guardar los cambios en los vehículos de este cliente
+            await this.vehicleRepository.save(customer.vehicles);
+            const receipt = await this.receiptRepository.findOne({
+              where: { customer:{id:customer.id}, status:'PENDING'},
+          });
+      
+            receipt.price += updateAmountAllCustomerDto.amount * customer.numberOfVehicles;
+      
+            await this.receiptRepository.save(receipt)
+        }
+
+        return { message: 'Monto actualizado correctamente', customers };
+
+    } catch (error) {
+        this.logger.error(error.message, error.stack);
+        throw error;
+    }
+}
+
 }
 

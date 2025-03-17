@@ -6,6 +6,7 @@ import { BoxList } from 'src/box-lists/entities/box-list.entity';
 import { addMonths, startOfMonth } from 'date-fns';
 import { Customer } from 'src/customers/entities/customer.entity';
 import { Receipt } from './entities/receipt.entity';
+import { UpdateReceiptDto } from './dto/update-receipt.dto';
 
 @Injectable()
 export class ReceiptsService {
@@ -46,7 +47,7 @@ export class ReceiptsService {
     }
     
 
-    async updateReceipt(customerId: string) {
+    async updateReceipt(customerId: string, updateReceiptDto : UpdateReceiptDto) {
         try {
             const customer = await this.customerRepository.findOne({ 
                 where: { id: customerId },
@@ -70,19 +71,32 @@ export class ReceiptsService {
             }
 
             receipt.status = 'PAID'
+            receipt.paymentType = updateReceiptDto.paymentType;
             receipt.paymentDate = new Date()
             const now = new Date();
             const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            receipt.dateNow = formattedDay;
              const boxListDate = formattedDay;
             let boxList = await this.boxListsService.findBoxByDate(boxListDate);
             
             if (!boxList) {
-                boxList = await this.boxListsService.createBox({
-                    date: boxListDate,
-                    totalPrice: receipt.price
-                });
+                if(receipt.paymentType === 'CASH'){
+                    boxList = await this.boxListsService.createBox({
+                        date: boxListDate,
+                        totalPrice: 0
+                    });
+                }else{
+                    boxList = await this.boxListsService.createBox({
+                        date: boxListDate,
+                        totalPrice: -receipt.price
+                    });
+                }
             } else {
-                boxList.totalPrice += receipt.price;
+                if(receipt.paymentType === 'CASH'){
+                    boxList.totalPrice += receipt.price;
+                }else{
+                    boxList.totalPrice -= receipt.price;
+                }
             
                 await this.boxListsService.updateBox(boxList.id, {
                     totalPrice: boxList.totalPrice,
@@ -138,8 +152,12 @@ export class ReceiptsService {
             if (!boxList) {
                 throw new NotFoundException('Box list not found');
             }
+            if(pendingReceipt.paymentType === 'TRANSFER'){
+                boxList.totalPrice += pendingReceipt.price;
+            }else{
+                boxList.totalPrice -= pendingReceipt.price;
+            }
     
-            boxList.totalPrice -= pendingReceipt.price;
     
             await this.boxListsService.updateBox(boxList.id, {
                 totalPrice: boxList.totalPrice,

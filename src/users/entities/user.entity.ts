@@ -1,3 +1,4 @@
+import { Note } from 'src/notes/entities/note.entity';
 import {
   Column,
   CreateDateColumn,
@@ -38,6 +39,9 @@ export class User {
 
   @Column('enum', { enum: USER_ROLES, default: USER_ROLES[0] })
   role: UserRole;
+
+  @OneToMany(() => Note, (notes) => notes.user, { cascade: true })
+  notes: Note[]
 
   @DeleteDateColumn()
   deletedAt: Date;

@@ -22,6 +22,9 @@ export class OtherPayment {
   @Column('int')
   price: number;
 
+  @Column('date', { nullable: true })
+  dateNow: Date | null;
+
   @ManyToOne(() => BoxList, (boxList) => boxList.otherPayments, { cascade: true })
   boxList: BoxList;
 }

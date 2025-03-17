@@ -9,7 +9,11 @@ export class CreateTicketDto {
 
     @IsNumber()
     @IsNotEmpty()
-    amount: number
+    dayPrice: number
+
+    @IsNumber()
+    @IsNotEmpty()
+    nightPrice: number
 
     @IsEnum(TICKET_TYPE)
     vehicleType: TicketType;

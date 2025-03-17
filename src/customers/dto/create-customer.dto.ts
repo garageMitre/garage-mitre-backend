@@ -1,6 +1,7 @@
 import { IsArray, IsEnum, IsNotEmpty, IsNumber, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CUSTOMER_TYPE, CustomerType } from '../entities/customer.entity';
+import { PARKING_TYPE, ParkingType } from '../entities/vehicle.entity';
 
 export class CreateVehicleDto {
         
@@ -11,6 +12,9 @@ export class CreateVehicleDto {
   @IsString()
   @IsNotEmpty()
   vehicleBrand: string;
+
+  @IsEnum(PARKING_TYPE)
+  parkingType: ParkingType;
 
   @IsNumber()
   @IsNotEmpty()

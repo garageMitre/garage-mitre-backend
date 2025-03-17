@@ -40,6 +40,7 @@
     "class-validator": "^0.14.1",
     "cloudinary": "^2.5.1",
     "date-fns": "^4.1.0",
+    "dayjs": "^1.11.13",
     "helmet": "^8.0.0",
     "nestjs-paginate": "^10.0.0",
     "passport-jwt": "^4.0.1",

@@ -6,6 +6,7 @@ import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { Customer, CustomerType } from './entities/customer.entity';
 import { CreateInterestSettingDto } from './dto/interest-setting.dto';
 import { AuthOrTokenAuthGuard } from 'src/utils/guards/auth-or-token.guard';
+import { UpdateAmountAllCustomerDto } from './dto/update-amount-all-customers.dto';
 
 
 @Controller('customers')
@@ -41,5 +42,15 @@ export class CustomersController {
   @Post('interestSetting')
   async createInterest(@Body() createInterestSettingDto: CreateInterestSettingDto) {
     return await this.customersService.createInterest(createInterestSettingDto);
+  }
+
+  @Get('interestSetting/interest')
+  async findInterest() {
+    return await this.customersService.findInterest();
+  }
+
+  @Patch('update/updateAmount') 
+  updateAmount(@Body() updateAmountAllCustomerDto: UpdateAmountAllCustomerDto) {
+    return this.customersService.updateAmount(updateAmountAllCustomerDto);
   }
 }

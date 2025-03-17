@@ -13,6 +13,10 @@ import { Customer } from 'src/customers/entities/customer.entity';
 
 export const PAYMENT_STATUS_TYPE = ['PENDING', 'PAID'] as const;
 export type PaymentStatusType = (typeof PAYMENT_STATUS_TYPE)[number];
+
+export const PAYMENT_TYPE = ['TRANSFER', 'CASH'] as const;
+export type PaymentType = (typeof PAYMENT_TYPE)[number];
+
 @Entity({ name: 'receipts' })
 export class Receipt {
   @PrimaryGeneratedColumn('uuid')
@@ -20,6 +24,9 @@ export class Receipt {
 
   @Column('enum', { enum: PAYMENT_STATUS_TYPE, default:'PENDING'})
   status: PaymentStatusType;
+
+  @Column('enum', { enum: PAYMENT_TYPE, nullable:true})
+  paymentType: PaymentType;
 
   @Column('date', { nullable: true })
   paymentDate: Date | null;
@@ -35,6 +42,9 @@ export class Receipt {
 
   @Column('int', {nullable: true})
   interestPercentage: number;
+  
+  @Column('date', { nullable: true })
+  dateNow: Date | null;
 
   @ManyToOne(() => Customer, (customer) => customer.receipts, { onDelete: 'CASCADE' })
   @JoinColumn()

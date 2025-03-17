@@ -15,9 +15,9 @@ import { Receipt } from 'src/receipts/entities/receipt.entity';
 import { Vehicle } from './vehicle.entity';
 import { InterestCustomer } from './interest-customer.entity';
 
-export const CUSTOMER_TYPE = ['OWNER', 'RENTER'] as const;
+export const CUSTOMER_TYPE = ['OWNER', 'RENTER', 'PRIVATE'] as const;
 export type CustomerType = (typeof CUSTOMER_TYPE)[number];
-  
+
   @Entity({ name: 'customers' })
   export class Customer {
     @PrimaryGeneratedColumn('uuid')

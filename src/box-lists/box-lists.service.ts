@@ -131,7 +131,9 @@ export class BoxListsService {
       const otherPayment = this.otherPaymentepository.create(createOtherPaymentDto);
 
       const now = new Date();
+      
       const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      otherPayment.dateNow = formattedDay;
       const boxListDate = formattedDay;
       let boxList = await this.findBoxByDate(boxListDate);
       

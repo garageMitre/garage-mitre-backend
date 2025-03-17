@@ -8,26 +8,24 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { BoxList } from 'src/box-lists/entities/box-list.entity';
+import { User } from 'src/users/entities/user.entity';
 
-@Entity({ name: 'ticket_registration_for_days' })
-export class TicketRegistrationForDay {
+@Entity({ name: 'notes' })
+export class Note {
   @PrimaryGeneratedColumn('uuid')
   id: string;
   
   @Column('varchar', { length: 255 })
   description: string;
 
-  @Column('int')
-  price: number;
-
-  @Column('int')
-  hours: number;
-  
   @Column('date', { nullable: true })
-  dateNow: Date | null;
-
-  @ManyToOne(() => BoxList, (boxList) => boxList.ticketRegistrationForDays, {onDelete: 'CASCADE'})
-  boxList: BoxList;
+  date: string | null;
+  
+  @Column('time', { nullable: true })
+  hours: string | null;
+  
+  @ManyToOne(() => User, (user) => user.notes, {onDelete: 'CASCADE'})
+  user: User;
 
   @CreateDateColumn()
   createdAt: Date;

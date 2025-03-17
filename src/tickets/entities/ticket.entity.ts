@@ -6,7 +6,7 @@ import {
 } from 'typeorm';
 import { TicketRegistration } from './ticket-registration.entity';
 
-export const TICKET_TYPE = ['AUTO', 'CAMIONETA', 'MOTO'] as const;
+export const TICKET_TYPE = ['AUTO', 'CAMIONETA'] as const;
 export type TicketType = (typeof TICKET_TYPE)[number];
 
 @Entity({ name: 'tickets' })
@@ -17,8 +17,14 @@ export class Ticket {
   @Column('varchar', { length: 255 })
   codeBar: string;
 
+  @Column('int', {nullable:true})
+  price: number;
+
   @Column('int',)
-  amount: number;
+  dayPrice: number;
+
+  @Column('int',)
+  nightPrice: number;
   
   @Column('enum', { enum: TICKET_TYPE})
   vehicleType: TicketType;
