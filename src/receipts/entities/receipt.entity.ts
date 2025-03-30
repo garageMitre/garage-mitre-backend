@@ -31,8 +31,14 @@ export class Receipt {
   @Column('date', { nullable: true })
   paymentDate: Date | null;
 
+  @Column('date', { nullable: true })
+  startDate: Date | null;
+
   @Column('int')
   price: number;
+
+  @Column('varchar', { nullable: true })
+  receiptNumber: string;  
 
   @Column('int')
   startAmount: number;

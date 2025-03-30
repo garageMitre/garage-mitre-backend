@@ -7,6 +7,9 @@ import { Customer, CustomerType } from './entities/customer.entity';
 import { CreateInterestSettingDto } from './dto/interest-setting.dto';
 import { AuthOrTokenAuthGuard } from 'src/utils/guards/auth-or-token.guard';
 import { UpdateAmountAllCustomerDto } from './dto/update-amount-all-customers.dto';
+import { CreateParkingTypeDto } from './dto/create-parking-type.dto';
+import { ParkingType } from './entities/parking-type.entity';
+import { UpdateParkingTypeDto } from './dto/update-parking-type.dto';
 
 
 @Controller('customers')
@@ -52,5 +55,25 @@ export class CustomersController {
   @Patch('update/updateAmount') 
   updateAmount(@Body() updateAmountAllCustomerDto: UpdateAmountAllCustomerDto) {
     return this.customersService.updateAmount(updateAmountAllCustomerDto);
+  }
+
+  @Post('parking/parkingTypes')
+  createParkingType(@Body() createParkingTypeDto: CreateParkingTypeDto) {
+    return this.customersService.createParkingType(createParkingTypeDto);
+  }
+
+  @Get('parking/parkingTypes')
+  findAllParkingType(@Paginate() query: PaginateQuery): Promise<Paginated<ParkingType>> {
+    return this.customersService.findAllParkingType(query);
+  }
+
+  @Patch('parking/parkingTypes/:parkingTypeId')
+  updateparkingType(@Param('parkingTypeId') parkingTypeId: string, @Body() updateParkingTypeDto: UpdateParkingTypeDto) {
+    return this.customersService.updateparkingType(parkingTypeId, updateParkingTypeDto);
+  }
+
+  @Delete('parking/parkingTypes/:parkingTypeId')
+  removeParkingType(@Param('parkingTypeId') parkingTypeId: string) {
+    return this.customersService.removeParkingType(parkingTypeId);
   }
 }

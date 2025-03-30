@@ -93,7 +93,7 @@ export class BoxListsService {
     try{
       const boxListWithRegistrations = await this.boxListRepository.findOne({
         where: { id: boxListId },
-        relations: ['ticketRegistrations', 'receiptOwners', 'receiptRenters'],
+        relations: ['ticketRegistrations', 'receipts', 'ticketRegistrationForDays','otherPayments'],
       });
       if(!boxListWithRegistrations){
         throw new NotFoundException('Box list not found')

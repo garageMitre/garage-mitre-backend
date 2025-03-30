@@ -29,14 +29,13 @@ export type CustomerType = (typeof CUSTOMER_TYPE)[number];
     @Column('varchar', { length: 255 })
     lastName: string;  
 
-    @Column('varchar', { length: 255, unique: true })
-    @Index({ unique: true })
+    @Column('varchar', { length: 255 })
     email: string;
 
     @Column('varchar', { length: 255 })
     address: string; 
     
-    @Column('int')
+    @Column('int', {nullable:true})
     documentNumber: number;
 
     @Column('int')
@@ -44,6 +43,9 @@ export type CustomerType = (typeof CUSTOMER_TYPE)[number];
 
     @Column('date', { nullable: true })
     startDate: Date | null;
+
+    @Column('date', { nullable: true })
+    previusStartDate: Date | null;
 
     @Column('enum', { enum: CUSTOMER_TYPE})
     customerType: CustomerType;

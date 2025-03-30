@@ -1,49 +1,49 @@
-import { IsArray, IsEnum, IsNotEmpty, IsNumber, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CUSTOMER_TYPE, CustomerType } from '../entities/customer.entity';
-import { PARKING_TYPE, ParkingType } from '../entities/vehicle.entity';
+import { Parking, PARKING_TYPE } from '../entities/parking-type.entity';
 
 export class CreateVehicleDto {
         
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   licensePlate: string;
 
+  @IsNumber()
+  @IsOptional()
+  garageNumber: number;
+
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   vehicleBrand: string;
 
   @IsEnum(PARKING_TYPE)
-  parkingType: ParkingType;
+  @IsOptional()
+  parking: Parking;
 
   @IsNumber()
-  @IsNotEmpty()
+  @IsOptional()
   amount: number;
 }
 
 export class CreateCustomerDto {
   @IsString()
-  @IsNotEmpty()
   firstName: string;
 
   @IsString()
-  @IsNotEmpty()
   lastName: string;
 
   @IsString()
-  @IsNotEmpty()
   email: string;
 
   @IsString()
-  @IsNotEmpty()
   address: string;
 
+  @IsOptional()
   @IsNumber()
-  @IsNotEmpty()
-  documentNumber: number;
+  documentNumber?: number;
 
   @IsNumber()
-  @IsNotEmpty()
   numberOfVehicles: number;
 
   @IsEnum(CUSTOMER_TYPE)

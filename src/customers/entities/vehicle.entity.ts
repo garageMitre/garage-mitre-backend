@@ -3,27 +3,28 @@ import {
     Column,
     ManyToOne,
     PrimaryGeneratedColumn,
+    OneToOne,
   } from 'typeorm';
   import { Customer } from './customer.entity';
-  
-  export const PARKING_TYPE = ['ONE_TYPE', 'EXPENSES_1', 'EXPENSES_2', 'EXPENSES_3'] as const;
-  export type ParkingType = (typeof PARKING_TYPE)[number];
-
+import { ParkingType } from './parking-type.entity';
   @Entity({ name: 'vehicles' })
   export class Vehicle {
     @PrimaryGeneratedColumn('uuid')
     id: string;
   
-    @Column('varchar', { length: 255 })
+    @Column('varchar', { length: 255, nullable:true })
     licensePlate: string;
+    
+    @Column('int',{nullable:true})
+    garageNumber: number;
   
-    @Column('varchar', { length: 255 })
+    @Column('varchar', { length: 255, nullable:true })
     vehicleBrand: string;
   
-    @Column('int')
+    @Column('int',{nullable:true})
     amount: number;
 
-    @Column('enum', { enum: PARKING_TYPE , default: PARKING_TYPE[0]})
+    @ManyToOne(() => ParkingType, (parkingType) => parkingType.vehicles, { onDelete: 'CASCADE' })
     parkingType: ParkingType;
   
     @ManyToOne(() => Customer, (customer) => customer.vehicles, { onDelete: 'CASCADE' })

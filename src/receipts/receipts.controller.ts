@@ -20,4 +20,9 @@ export class ReceiptsController {
     ) {
         return await this.receiptsService.cancelReceipt(customerId);
     }
+
+    @Patch('numberGenerator/:customerId')
+    async numberGeneratorForAllCustomer( @Param('customerId') customerId: string) {
+        return await this.receiptsService.numberGeneratorForAllCustomer(customerId);
+    }
 }

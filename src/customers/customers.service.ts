@@ -15,6 +15,9 @@ import { Cron } from '@nestjs/schedule';
 import { isUUID } from 'class-validator';
 import { InterestCustomer } from './entities/interest-customer.entity';
 import { UpdateAmountAllCustomerDto } from './dto/update-amount-all-customers.dto';
+import { ParkingType } from './entities/parking-type.entity';
+import { CreateParkingTypeDto } from './dto/create-parking-type.dto';
+import { UpdateParkingTypeDto } from './dto/update-parking-type.dto';
 
 @Injectable()
 export class CustomersService {
@@ -25,6 +28,8 @@ export class CustomersService {
       private readonly customerRepository: Repository<Customer>,
       @InjectRepository(Vehicle)
       private readonly vehicleRepository: Repository<Vehicle>,
+      @InjectRepository(ParkingType)
+      private readonly parkingTypeRepository: Repository<ParkingType>,
       @InjectRepository(Receipt)
       private readonly receiptRepository: Repository<Receipt>,
       @InjectRepository(InterestSettings)
@@ -36,14 +41,7 @@ export class CustomersService {
 
     async create(createCustomerDto: CreateCustomerDto) {
       try {
-        const existingCustomerEmail = await this.customerRepository.findOne({
-          where: { email: createCustomerDto.email },
-        });
-  
-        if (existingCustomerEmail) {
-          throw new ConflictException('email already exists');
-        }
-
+    
         const customer = this.customerRepository.create({
           ...createCustomerDto,
           vehicles: [],
@@ -56,9 +54,40 @@ export class CustomersService {
         const savedCustomer = await this.customerRepository.save(customer);
     
         if (createCustomerDto.vehicles && createCustomerDto.vehicles.length > 0) {
-          const vehicles = createCustomerDto.vehicles.map((vehicle) =>
-            this.vehicleRepository.create({ ...vehicle, customer: savedCustomer })
-          );
+          const vehicles = [];
+
+          for (const vehicleDto of createCustomerDto.vehicles) {
+            if(customer.customerType === 'OWNER'){
+              const parkingType = await this.parkingTypeRepository.findOne({
+                where: { parkingType: vehicleDto.parking },
+              });
+      
+              if (!parkingType) {
+                throw new NotFoundException({
+                  code: 'PARKING_TYPE_NOT_FOUND',
+                  message: 'Parking type not found',
+                });
+              }
+      
+              const vehicle = this.vehicleRepository.create({
+                ...vehicleDto,
+                parkingType, // opcional, depende si esperás la relación o solo el ID
+                amount: parkingType.amount,
+                customer: savedCustomer,
+              });
+              vehicles.push(vehicle);
+              
+            }else{
+              const vehicle = this.vehicleRepository.create({
+                ...vehicleDto,
+                parkingType: null,
+                customer: savedCustomer,
+              });
+              vehicles.push(vehicle);
+            }
+    
+          }
+    
           await this.vehicleRepository.save(vehicles);
         }
     
@@ -71,6 +100,7 @@ export class CustomersService {
       }
     }
     
+    
   async findAll(query: PaginateQuery, customer: CustomerType): Promise<Paginated<Customer>> {
     try {
       return await paginate(query, this.customerRepository, {
@@ -82,7 +112,7 @@ export class CustomersService {
           firstName: [FilterOperator.ILIKE, FilterOperator.EQ],
           email: [FilterOperator.EQ, FilterOperator.ILIKE],
         },
-        relations: ['receipts', 'vehicles'],
+        relations: ['receipts', 'vehicles', 'vehicles.parkingType'],
         where: {customerType : customer}
       });
     } catch (error) {
@@ -94,7 +124,7 @@ export class CustomersService {
     try {
       const customer = await this.customerRepository.findOne({
         where: { id },
-        relations: ['receipts', 'interests'],
+        relations: ['receipts', 'interests', 'vehicles','vehicles.parkingType'],
       });
   
       if (!customer) {
@@ -122,7 +152,7 @@ export class CustomersService {
     try {
       const customer = await this.customerRepository.findOne({
         where: { id },
-        relations: ['vehicles', 'receipts'],
+        relations: ['vehicles', 'receipts'], // Asegúrate de que las relaciones estén bien cargadas
       });
   
       if (!customer) {
@@ -130,35 +160,72 @@ export class CustomersService {
       }
   
       if (customer.vehicles.length > 0) {
-        await this.vehicleRepository.remove(customer.vehicles);
-        customer.vehicles = [];
+        await this.vehicleRepository.remove(customer.vehicles); // Eliminar vehículos previos
+        customer.vehicles = []; // Limpiar el array de vehículos
       }
   
-      const newVehicles = updateCustomerDto.vehicles.map((vehicleDto) =>
-        this.vehicleRepository.create({
-          ...vehicleDto,
-          customer,
-        }),
-      );
+      if (updateCustomerDto.vehicles && updateCustomerDto.vehicles.length > 0) {
+        const vehicles = [];
   
-      const savedVehicles = await this.vehicleRepository.save(newVehicles);
+        for (const vehicleDto of updateCustomerDto.vehicles) {
+          if (customer.customerType === 'OWNER') {
+            const parkingType = await this.parkingTypeRepository.findOne({
+              where: { parkingType: vehicleDto.parking },
+            });
   
-      customer.vehicles = savedVehicles;
-
+            if (!parkingType) {
+              throw new NotFoundException({
+                code: 'PARKING_TYPE_NOT_FOUND',
+                message: 'Parking type not found',
+              });
+            }
+            const vehicle = this.vehicleRepository.create({
+              ...vehicleDto,
+              customer: customer, // Relacionamos el cliente al vehículo
+              parkingType: parkingType, // Relacionamos el parkingType con el vehículo
+              amount: parkingType.amount,
+            });
+  
+            vehicles.push(vehicle);
+          } else {
+            const vehicle = this.vehicleRepository.create({
+              ...vehicleDto,
+              customer: customer, // Relacionamos el cliente al vehículo
+              parkingType: null,
+            });
+            vehicles.push(vehicle);
+          }
+        }
+  
+        // Guardar los vehículos después de haber sido creados
+        await this.vehicleRepository.save(vehicles);
+        
+        // Actualizar el cliente después de agregar los vehículos
+        customer.vehicles = vehicles; // Asociar los vehículos al cliente
+      }
+  
+      // Actualizar los datos del cliente
       const { vehicles, ...customerData } = updateCustomerDto;
       this.customerRepository.merge(customer, customerData);
   
       const savedCustomer = await this.customerRepository.save(customer);
-
-      const totalVehicleAmount = customer.vehicles.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0);
-
+  
+      // Calcular el monto total de los vehículos
+      const totalVehicleAmount = customer.vehicles.reduce(
+        (acc, vehicle) => acc + (vehicle.amount || 0),
+        0
+      );
+  
+      // Actualizar el recibo del cliente
       const receipt = await this.receiptRepository.findOne({
-        where: { customer:{id:customer.id}, status:'PENDING'},
-    });
-
-      receipt.price = totalVehicleAmount;
-
-      await this.receiptRepository.save(receipt)
+        where: { customer: { id: customer.id }, status: 'PENDING' },
+      });
+  
+      if (receipt) {
+        receipt.price = totalVehicleAmount;
+        await this.receiptRepository.save(receipt);
+      }
+  
       return savedCustomer;
     } catch (error) {
       if (!(error instanceof NotFoundException)) {
@@ -167,6 +234,7 @@ export class CustomersService {
       throw error;
     }
   }
+  
 
   async remove(id: string) {
     try{
@@ -349,6 +417,93 @@ export class CustomersService {
         this.logger.error(error.message, error.stack);
         throw error;
     }
+}
+
+async createParkingType(createParkingTypeDto: CreateParkingTypeDto) {
+  try {
+    const existType = await this.parkingTypeRepository.findOne({where:{parkingType:createParkingTypeDto.parkingType}})
+    if(existType){
+      await this.parkingTypeRepository.remove(existType)
+      const parkingType = this.parkingTypeRepository.create(createParkingTypeDto);
+      const savedParkingType = await this.parkingTypeRepository.save(parkingType);
+  
+      return savedParkingType;
+    }
+    const parkingType = this.parkingTypeRepository.create(createParkingTypeDto);
+    const savedParkingType = await this.parkingTypeRepository.save(parkingType);
+
+    return savedParkingType;
+  } catch (error) {
+    this.logger.error(error.message, error.stack);
+  }
+}
+
+  async findAllParkingType(query: PaginateQuery): Promise<Paginated<ParkingType>> {
+    try {
+      return await paginate(query, this.parkingTypeRepository, {
+        sortableColumns: ['id'],
+        nullSort: 'last',
+        searchableColumns: ['parkingType'],
+        filterableColumns: {
+          parkingType: [FilterOperator.ILIKE, FilterOperator.EQ],
+        },
+        relations: ['vehicles']
+      });
+    } catch (error) {
+      this.logger.error(error.message, error.stack);
+    }
+  }
+
+async updateparkingType(parkingTypeId: string, updateParkingTypeDto: UpdateParkingTypeDto) {
+  try{
+    const parkingType = await this.parkingTypeRepository.findOne({where:{id:parkingTypeId}})
+
+    if(!parkingType){
+      throw new NotFoundException('ParkingType not found')
+    }
+    const owners = await this.customerRepository.find({where:{customerType:'OWNER'}});
+    const differenceAmount = updateParkingTypeDto > parkingType ? updateParkingTypeDto.amount - parkingType.amount : parkingType.amount - updateParkingTypeDto.amount;
+
+    for(const owner of owners){
+      const receipt = await this.receiptRepository.findOne({
+        where: { customer: { id: owner.id }, status: 'PENDING' },
+      });
+  
+      receipt.price = updateParkingTypeDto > parkingType ? receipt.price + differenceAmount : receipt.price - differenceAmount;
+
+      await this.receiptRepository.save(receipt);
+    }
+    
+    const updateParkingType = this.parkingTypeRepository.merge(parkingType, updateParkingTypeDto);
+
+    const savedParkingType = await this.parkingTypeRepository.save(updateParkingType); 
+
+    return savedParkingType;
+  } catch (error) {
+      if (!(error instanceof NotFoundException)) {
+        this.logger.error(error.message, error.stack);
+      }
+      throw error;
+    }
+}
+
+async removeParkingType(parkingTypeId: string) {
+  try{
+    const parkingType = await this.parkingTypeRepository.findOne({where:{id:parkingTypeId}})
+
+    if(!parkingType){
+      throw new NotFoundException('ParkingType not found')
+    }
+
+    await this.parkingTypeRepository.remove(parkingType);
+
+    return {message: 'Parking Type list removed successfully'}
+  } catch (error) {
+    if (!(error instanceof NotFoundException)) {
+      this.logger.error(error.message, error.stack);
+    }
+    throw error;
+  }
 }
 
 }

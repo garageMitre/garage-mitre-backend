@@ -15,7 +15,7 @@ export class Note {
   @PrimaryGeneratedColumn('uuid')
   id: string;
   
-  @Column('varchar', { length: 255 })
+  @Column('varchar', { length: 650 })
   description: string;
 
   @Column('date', { nullable: true })
