@@ -12,13 +12,11 @@ export class CreateTicketRegistrationDto {
 
     @IsString()
     @IsOptional()
-    @Matches(/^\d{4}-\d{2}-\d{2}$/)
-    entryDay: Date
+    entryDay: string
 
     @IsString()
     @IsOptional()
-    @Matches(/^\d{4}-\d{2}-\d{2}$/)
-    departureDay: Date
+    departureDay: string
 
     @IsString()
     @IsNotEmpty()

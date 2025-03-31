@@ -15,7 +15,14 @@ import { UpdateTicketRegistrationDto } from './dto/update-ticket-registration.dt
 import { FilterOperator, paginate, Paginated, PaginateQuery } from 'nestjs-paginate';
 import { CreateTicketRegistrationForDayDto } from './dto/create-ticket-registration-for-day.dto';
 import { TicketRegistrationForDay } from './entities/ticket-registration-for-day.entity';
+import * as dayjs from 'dayjs';
+import * as utc from 'dayjs/plugin/utc';
+import * as timezone from 'dayjs/plugin/timezone';
+import * as isBetween from 'dayjs/plugin/isBetween'; 
 
+dayjs.extend(utc);
+dayjs.extend(timezone);
+dayjs.extend(isBetween);
 @Injectable()
 export class TicketsService {
   private readonly logger = new Logger(TicketsService.name);
@@ -134,13 +141,13 @@ export class TicketsService {
         };
 
         if (!existingRegistration) {
-            const localTime = getLocalTime(now);
-
+            const argentinaTime = (dayjs().tz('America/Argentina/Buenos_Aires') as dayjs.Dayjs);
+  
             const createTicketRegistrationDto: CreateTicketRegistrationDto = {
                 description: `Registro de ticket para vehículo tipo ${ticket.vehicleType}`,
                 price: 0,
-                entryDay: formattedDay,
-                entryTime: localTime,
+                entryDay: argentinaTime.format('YYYY-MM-DD'),
+                entryTime: argentinaTime.format('HH:mm:ss'),
                 departureDay: null,
                 departureTime: null,
                 dateNow: null
@@ -217,24 +224,27 @@ async updateRegistration(existingRegistration: TicketRegistration, now: Date, fo
 
         const diffMinutes = departureMinutes - entryMinutes;
         const hours = Math.ceil((diffMinutes - 5) / 60);
+        const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
+        const isDaytime = argentinaTime.isBetween(dayjs(argentinaTime).startOf('day').hour(6), dayjs(argentinaTime).startOf('day').hour(19), null, '[)');
 
-        const isNightTime = departureMinutes < 360 || departureMinutes >= 1140;
-
-        const pricePerHour = isNightTime ? ticket.nightPrice : ticket.dayPrice;
-
-        ticket.price = pricePerHour;
+        if(isDaytime){
+          ticket.price = ticket.dayPrice;
+        }else{
+          ticket.price = ticket.nightPrice;
+        }
 
        await this.ticketRepository.save(ticket)
     
         const price = diffMinutes < 5 ? 0 : Math.max(hours, 1) * ticket.price;
+
 
         const updateTicketRegistrationDto: UpdateTicketRegistrationDto = {
             description: `Tipo: ${existingRegistration.ticket.vehicleType}, Ent: ${existingRegistration.entryTime}, Sal: ${localTime}`,
             price: price,
             entryDay: existingRegistration.entryDay,
             entryTime: existingRegistration.entryTime,
-            departureDay: formattedDay,
-            departureTime: localTime,
+            departureDay: argentinaTime.format('YYYY-MM-DD'),
+            departureTime: argentinaTime.format('HH:mm:ss'),
             dateNow: formattedDay
         };
 

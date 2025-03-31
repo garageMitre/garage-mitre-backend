@@ -21,10 +21,10 @@ export class TicketRegistration {
   price: number;
   
   @Column('date', { nullable: true })
-  entryDay: Date | null;
+  entryDay: string | null;
   
   @Column('date', { nullable: true })
-  departureDay: Date | null;
+  departureDay: string | null;
   
   @Column('time', { nullable: true })
   entryTime: string | null;
