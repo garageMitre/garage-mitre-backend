@@ -15,15 +15,12 @@ export class NotificationGateway implements OnGatewayInit, OnGatewayConnection, 
   private logger = new Logger('NotificationGateway');
 
   afterInit(server: Server) {
-    this.logger.log('WebSocket Inicializado 🚀');
   }
 
   handleConnection(client: Socket) {
-    this.logger.log(`Cliente conectado: ${client.id}`);
   }
 
   handleDisconnect(client: Socket) {
-    this.logger.log(`Cliente desconectado: ${client.id}`);
   }
 
   sendNotification(message: any) {

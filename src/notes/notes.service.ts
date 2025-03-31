@@ -4,11 +4,16 @@ import { UpdateNoteDto } from './dto/update-note.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Note } from './entities/note.entity';
 import { MoreThanOrEqual, Repository } from 'typeorm';
-import * as dayjs from 'dayjs';
 import { FilterOperator, paginate, Paginated, PaginateQuery } from 'nestjs-paginate';
 import { User } from 'src/users/entities/user.entity';
 import { NotificationGateway } from './notification-gateway';
 import { v4 as uuidv4 } from 'uuid'; 
+import * as dayjs from 'dayjs';
+import * as utc from 'dayjs/plugin/utc';
+import * as timezone from 'dayjs/plugin/timezone';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 
 @Injectable()
@@ -26,28 +31,35 @@ export class NotesService {
     async create(createNoteDto: CreateNoteDto, userId: string) {
       try {
         const user = await this.userRepository.findOne({
-          where: { id:userId },
+          where: { id: userId },
         });
     
         if (!user) {
           throw new NotFoundException(`User not found`);
         }
+    
         const note = this.noteRepository.create({
           ...createNoteDto,
-          user
+          user,
         });
     
-        note.date = dayjs().format('YYYY-MM-DD'); // Formato compatible con tipo 'date'
-        note.hours = dayjs().format('HH:mm:ss');
+        // Zona horaria de Argentina
+        const argentinaTime = (dayjs().tz('America/Argentina/Buenos_Aires') as dayjs.Dayjs);
+
+    
+        note.date = argentinaTime.format('YYYY-MM-DD');
+        note.hours = argentinaTime.format('HH:mm:ss');
     
         await this.noteRepository.save(note);
+    
         const notificationId = uuidv4();
-        // Emitir notificación de fondos insuficientes
+    
         this.notificationGateway.sendNotification({
           id: notificationId,
           type: 'NEW_NOTE',
           noteId: note.id,
         });
+    
         return note;
       } catch (error) {
         this.logger.error(error.message, error.stack);
