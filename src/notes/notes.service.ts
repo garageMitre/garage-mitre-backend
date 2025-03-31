@@ -7,6 +7,9 @@ import { MoreThanOrEqual, Repository } from 'typeorm';
 import * as dayjs from 'dayjs';
 import { FilterOperator, paginate, Paginated, PaginateQuery } from 'nestjs-paginate';
 import { User } from 'src/users/entities/user.entity';
+import { NotificationGateway } from './notification-gateway';
+import { v4 as uuidv4 } from 'uuid'; 
+
 
 @Injectable()
 export class NotesService {
@@ -17,6 +20,7 @@ export class NotesService {
       private readonly noteRepository: Repository<Note>,
       @InjectRepository(User)
       private readonly userRepository: Repository<User>,
+      private readonly notificationGateway: NotificationGateway,
     ) {}
 
     async create(createNoteDto: CreateNoteDto, userId: string) {
@@ -37,6 +41,13 @@ export class NotesService {
         note.hours = dayjs().format('HH:mm:ss');
     
         await this.noteRepository.save(note);
+        const notificationId = uuidv4();
+        // Emitir notificación de fondos insuficientes
+        this.notificationGateway.sendNotification({
+          id: notificationId,
+          type: 'NEW_NOTE',
+          noteId: note.id,
+        });
         return note;
       } catch (error) {
         this.logger.error(error.message, error.stack);

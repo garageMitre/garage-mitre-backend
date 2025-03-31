@@ -246,7 +246,6 @@ export class ReceiptsService {
                 order: { updateAt: 'DESC' }, // Ordenar por la fecha de creación, de más reciente a más antiguo
                 take: 1, // Limitar a un solo recibo
             });
-            console.log(orderReceiptNumbers)
             
             // Si existe un recibo pendiente
             if (orderReceiptNumbers.length > 0 && orderReceiptNumbers[0].receiptNumber) {
