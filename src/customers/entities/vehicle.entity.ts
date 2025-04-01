@@ -15,8 +15,8 @@ import { ParkingType } from './parking-type.entity';
     @Column('varchar', { length: 255, nullable:true })
     licensePlate: string;
     
-    @Column('int',{nullable:true})
-    garageNumber: number;
+    @Column('varchar',{nullable:true})
+    garageNumber: string;
   
     @Column('varchar', { length: 255, nullable:true })
     vehicleBrand: string;

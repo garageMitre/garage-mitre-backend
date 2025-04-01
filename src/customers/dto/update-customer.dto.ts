@@ -9,9 +9,9 @@ export class CreateVehicleDto {
   @IsOptional()
   licensePlate: string;
 
-  @IsNumber()
+  @IsString()
   @IsOptional()
-  garageNumber: number;
+  garageNumber: string;
 
   @IsString()
   @IsOptional()

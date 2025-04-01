@@ -23,8 +23,8 @@ export class CustomersController {
   }
 
   @Get('customer/:customerType')
-  findAll(@Paginate() query: PaginateQuery, @Param('customerType') customer: CustomerType): Promise<Paginated<Customer>> {
-    return this.customersService.findAll(query, customer);
+  findAll(@Param('customerType') customer: CustomerType) {
+    return this.customersService.findAll(customer);
   }
 
   @Get(':id')

@@ -99,22 +99,14 @@ export class CustomersService {
         throw error;
       }
     }
-    
-    
-  async findAll(query: PaginateQuery, customer: CustomerType): Promise<Paginated<Customer>> {
+
+  async findAll(customer: CustomerType){
     try {
-      return await paginate(query, this.customerRepository, {
-        sortableColumns: ['id', 'firstName', 'email'],
-        nullSort: 'last',
-        defaultSortBy: [['createdAt', 'DESC']],
-        searchableColumns: ['firstName', 'email'],
-        filterableColumns: {
-          firstName: [FilterOperator.ILIKE, FilterOperator.EQ],
-          email: [FilterOperator.EQ, FilterOperator.ILIKE],
-        },
+      const customers = await this.customerRepository.find({
         relations: ['receipts', 'vehicles', 'vehicles.parkingType'],
-        where: {customerType : customer}
-      });
+        where: {customerType : customer}})
+
+        return customers;
     } catch (error) {
       this.logger.error(error.message, error.stack);
     }
