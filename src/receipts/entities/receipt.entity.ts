@@ -29,10 +29,10 @@ export class Receipt {
   paymentType: PaymentType;
 
   @Column('date', { nullable: true })
-  paymentDate: Date | null;
+  paymentDate: string | null;
 
   @Column('date', { nullable: true })
-  startDate: Date | null;
+  startDate: string | null;
 
   @Column('int')
   price: number;
@@ -50,7 +50,7 @@ export class Receipt {
   interestPercentage: number;
   
   @Column('date', { nullable: true })
-  dateNow: Date | null;
+  dateNow: string | null;
 
   @ManyToOne(() => Customer, (customer) => customer.receipts, { onDelete: 'CASCADE' })
   @JoinColumn()

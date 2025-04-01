@@ -19,6 +19,15 @@ import { ParkingType } from './entities/parking-type.entity';
 import { CreateParkingTypeDto } from './dto/create-parking-type.dto';
 import { UpdateParkingTypeDto } from './dto/update-parking-type.dto';
 
+import * as dayjs from 'dayjs';
+import * as utc from 'dayjs/plugin/utc';
+import * as timezone from 'dayjs/plugin/timezone';
+import * as isBetween from 'dayjs/plugin/isBetween'; 
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+dayjs.extend(isBetween);
+
 @Injectable()
 export class CustomersService {
     private readonly logger = new Logger(CustomersService.name);
@@ -46,11 +55,13 @@ export class CustomersService {
           ...createCustomerDto,
           vehicles: [],
         });
-    
-        const now = new Date();
-        const nextMonthStartDate = startOfMonth(addMonths(now, 1));
-        customer.startDate = nextMonthStartDate;
-    
+        
+        const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
+        const nextMonthStartDate = argentinaTime.add(1, 'month').startOf('month').format('YYYY-MM-DD');
+        
+        customer.startDate = nextMonthStartDate; // Ahora es un string en formato 'YYYY-MM-DD'
+        
+        
         const savedCustomer = await this.customerRepository.save(customer);
     
         if (createCustomerDto.vehicles && createCustomerDto.vehicles.length > 0) {

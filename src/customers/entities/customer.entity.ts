@@ -42,10 +42,10 @@ export type CustomerType = (typeof CUSTOMER_TYPE)[number];
     numberOfVehicles: number;
 
     @Column('date', { nullable: true })
-    startDate: Date | null;
+    startDate: string | null;
 
     @Column('date', { nullable: true })
-    previusStartDate: Date | null;
+    previusStartDate: string | null;
 
     @Column('enum', { enum: CUSTOMER_TYPE})
     customerType: CustomerType;

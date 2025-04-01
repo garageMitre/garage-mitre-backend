@@ -9,6 +9,15 @@ import { Receipt } from './entities/receipt.entity';
 import { UpdateReceiptDto } from './dto/update-receipt.dto';
 import { IsNull } from 'typeorm';
 
+import * as dayjs from 'dayjs';
+import * as utc from 'dayjs/plugin/utc';
+import * as timezone from 'dayjs/plugin/timezone';
+import * as isBetween from 'dayjs/plugin/isBetween'; 
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+dayjs.extend(isBetween);
+
 @Injectable()
 export class ReceiptsService {
     private readonly logger = new Logger(ReceiptsService.name);
@@ -34,12 +43,13 @@ export class ReceiptsService {
             const price = totalVehicleAmount;
             const now = new Date();
             const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
+            const argentinaTime = (dayjs().tz('America/Argentina/Buenos_Aires') as dayjs.Dayjs);
+          
             const receipt = this.receiptRepository.create({
                 customer,
                 price,
                 startAmount: price,
-                dateNow: formattedDay,
+                dateNow: argentinaTime.format('YYYY-MM-DD'),
                 startDate:customer.startDate
             });
     
@@ -71,12 +81,8 @@ export class ReceiptsService {
       
           if (!receipt) throw new NotFoundException('Receipt not found');
       
-          const now = new Date();
-          const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // sin hora
-
-          const hasPaid = customer.startDate
-            ? customer.startDate > receipt.dateNow
-            : false;
+          const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
+          const hasPaid = customer.startDate ? argentinaTime.isBefore(dayjs(customer.startDate)) : false;
 
           if (hasPaid) {
             throw new NotFoundException({
@@ -84,37 +90,40 @@ export class ReceiptsService {
               message: 'This bill was already paid this month.',
             });
           }
-          const nextMonthStartDate = startOfMonth(addMonths(now, 1));
+          const nextMonthStartDate = argentinaTime.add(1, 'month').startOf('month').format('YYYY-MM-DD');
       
           customer.previusStartDate = customer.startDate;
           customer.startDate = nextMonthStartDate;
       
           await queryRunner.manager.save(Customer, customer);
+
+          if(updateReceiptDto.print){
+            const orderReceiptNumbers = await queryRunner.manager.find(Receipt, {
+              where: { receiptNumber: Not(IsNull()) },
+              order: { updateAt: 'DESC' },
+              take: 1,
+            });
+        
+            if (orderReceiptNumbers.length > 0 && orderReceiptNumbers[0].receiptNumber) {
+              const lastReceiptNumber = orderReceiptNumbers[0].receiptNumber;
+              const [shortNumber, longNumber] = lastReceiptNumber.split('-').map(num => num.replace('N° ', '').trim());
+        
+              const incrementedShortNumber = parseInt(shortNumber).toString().padStart(4, '0');
+              const incrementedLongNumber = (parseInt(longNumber) + 1).toString().padStart(8, '0');
+        
+              receipt.receiptNumber = `N° ${incrementedShortNumber}-${incrementedLongNumber}`;
+            } else {
+              receipt.receiptNumber = `N° 0000-00000001`;
+            }
       
-      
-      
-          const orderReceiptNumbers = await queryRunner.manager.find(Receipt, {
-            where: { receiptNumber: Not(IsNull()) },
-            order: { updateAt: 'DESC' },
-            take: 1,
-          });
-      
-          if (orderReceiptNumbers.length > 0 && orderReceiptNumbers[0].receiptNumber) {
-            const lastReceiptNumber = orderReceiptNumbers[0].receiptNumber;
-            const [shortNumber, longNumber] = lastReceiptNumber.split('-').map(num => num.replace('N° ', '').trim());
-      
-            const incrementedShortNumber = parseInt(shortNumber).toString().padStart(4, '0');
-            const incrementedLongNumber = (parseInt(longNumber) + 1).toString().padStart(8, '0');
-      
-            receipt.receiptNumber = `N° ${incrementedShortNumber}-${incrementedLongNumber}`;
-          } else {
-            receipt.receiptNumber = `N° 0000-00000001`;
           }
       
           receipt.status = 'PAID';
           receipt.paymentType = updateReceiptDto.paymentType;
-          receipt.paymentDate = new Date();
-          receipt.dateNow = formattedDay;
+          receipt.paymentDate = argentinaTime.format('YYYY-MM-DD'),
+          receipt.dateNow = argentinaTime.format('YYYY-MM-DD')
+          const now = new Date();
+          const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // sin hora
       
           let boxList = await this.boxListsService.findBoxByDate(formattedDay);
       
@@ -160,7 +169,11 @@ export class ReceiptsService {
             if (!customer) {
                 throw new NotFoundException('Customer not found');
             }
-    
+            customer.startDate = customer.previusStartDate;
+            customer.previusStartDate = dayjs(customer.previusStartDate)
+              .subtract(1, 'month')
+              .format('YYYY-MM-DD');
+            await this.customerRepository.save(customer);
             const receipts = customer.receipts.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     
             if (receipts.length === 0) {
@@ -210,10 +223,12 @@ export class ReceiptsService {
                 lastPaidReceipt.status = 'PENDING';
                 lastPaidReceipt.paymentDate = null;
                 lastPaidReceipt.boxList = null;
-                lastPaidReceipt.receiptNumber = null
+                lastPaidReceipt.receiptNumber = null;
+                lastPaidReceipt.paymentType = null;
     
                 await this.receiptRepository.save(lastPaidReceipt);
             }
+
     
             return customer;
         } catch (error) {
