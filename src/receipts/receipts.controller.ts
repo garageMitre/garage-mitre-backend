@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Post, Body, Patch, UseGuards } from '@nestjs/common';
 import { ReceiptsService } from './receipts.service';
 import { UpdateReceiptDto } from './dto/update-receipt.dto';
+import { CustomerType } from 'src/customers/entities/customer.entity';
 
 @Controller('receipts')
 export class ReceiptsController {
@@ -19,6 +20,11 @@ export class ReceiptsController {
         @Param('customerId') customerId: string
     ) {
         return await this.receiptsService.cancelReceipt(customerId);
+    }
+
+    @Get(':customerType')
+    async findAllPendingReceipts( @Param('customerType') customer: CustomerType) {
+        return await this.receiptsService.findAllPendingReceipts(customer);
     }
 
     @Patch('numberGenerator/:customerId')

@@ -4,7 +4,7 @@ import { DataSource, Not, Repository } from 'typeorm';
 import { BoxListsService } from 'src/box-lists/box-lists.service';
 import { BoxList } from 'src/box-lists/entities/box-list.entity';
 import { addMonths, startOfMonth } from 'date-fns';
-import { Customer } from 'src/customers/entities/customer.entity';
+import { Customer, CustomerType } from 'src/customers/entities/customer.entity';
 import { Receipt } from './entities/receipt.entity';
 import { UpdateReceiptDto } from './dto/update-receipt.dto';
 import { IsNull } from 'typeorm';
@@ -41,8 +41,6 @@ export class ReceiptsService {
             const totalVehicleAmount = customer.vehicles.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0);
 
             const price = totalVehicleAmount;
-            const now = new Date();
-            const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
             const argentinaTime = (dayjs().tz('America/Argentina/Buenos_Aires') as dayjs.Dayjs);
           
             const receipt = this.receiptRepository.create({
@@ -64,41 +62,40 @@ export class ReceiptsService {
     
 
     async updateReceipt(customerId: string, updateReceiptDto: UpdateReceiptDto) {
-        const queryRunner = this.dataSource.createQueryRunner();
-        await queryRunner.connect();
-        await queryRunner.startTransaction();
       
         try {
-          const customer = await queryRunner.manager.findOne(Customer, {
+          const customer = await this.customerRepository.findOne({
             where: { id: customerId },
             relations: ['receipts'],
           });
-      
+        
           if (!customer) throw new NotFoundException('Customer not found');
-          const receipt = await queryRunner.manager.findOne(Receipt, {
+        
+          const receipt = await this.receiptRepository.findOne({
             where: { customer: { id: customer.id }, status: 'PENDING' },
           });
-      
+        
           if (!receipt) throw new NotFoundException('Receipt not found');
-      
+        
           const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
           const hasPaid = customer.startDate ? argentinaTime.isBefore(dayjs(customer.startDate)) : false;
-
+        
           if (hasPaid) {
             throw new NotFoundException({
               code: 'RECEIPT_PAID',
               message: 'This bill was already paid this month.',
             });
           }
+        
           const nextMonthStartDate = argentinaTime.add(1, 'month').startOf('month').format('YYYY-MM-DD');
-      
+        
           customer.previusStartDate = customer.startDate;
           customer.startDate = nextMonthStartDate;
-      
-          await queryRunner.manager.save(Customer, customer);
-
-          if(updateReceiptDto.print){
-            const orderReceiptNumbers = await queryRunner.manager.find(Receipt, {
+        
+          await this.customerRepository.save(customer); // Se actualiza el customer
+        
+          if (updateReceiptDto.print) {
+            const orderReceiptNumbers = await this.receiptRepository.find({
               where: { receiptNumber: Not(IsNull()) },
               order: { updateAt: 'DESC' },
               take: 1,
@@ -113,20 +110,20 @@ export class ReceiptsService {
         
               receipt.receiptNumber = `N° ${incrementedShortNumber}-${incrementedLongNumber}`;
             } else {
-              receipt.receiptNumber = `N° 0000-00000001`;
+              receipt.receiptNumber = 'N° 0000-00000001';
             }
-      
           }
-      
+        
           receipt.status = 'PAID';
           receipt.paymentType = updateReceiptDto.paymentType;
-          receipt.paymentDate = argentinaTime.format('YYYY-MM-DD'),
-          receipt.dateNow = argentinaTime.format('YYYY-MM-DD')
+          receipt.paymentDate = argentinaTime.format('YYYY-MM-DD');
+          receipt.dateNow = argentinaTime.format('YYYY-MM-DD');
+        
           const now = new Date();
-          const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // sin hora
-      
+          const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        
           let boxList = await this.boxListsService.findBoxByDate(formattedDay);
-      
+        
           if (!boxList) {
             boxList = await this.boxListsService.createBox({
               date: formattedDay,
@@ -138,24 +135,19 @@ export class ReceiptsService {
               totalPrice: boxList.totalPrice,
             });
           }
-      
+        
           receipt.boxList = { id: boxList.id } as BoxList;
-          await queryRunner.manager.save(Receipt, receipt);
-      
-          // Crear nuevo recibo
+          await this.receiptRepository.save(receipt); // Se actualiza el receipt con los nuevos datos
+        
+          // Se crea el nuevo recibo con la info actualizada del customer
           await this.createReceipt(customer.id);
-      
-          await queryRunner.commitTransaction();
+        
           return receipt;
-      
         } catch (error) {
-          await queryRunner.rollbackTransaction();
           if (!(error instanceof NotFoundException)) {
             this.logger.error(error.message, error.stack);
           }
           throw error;
-        } finally {
-          await queryRunner.release();
         }
       }
 
@@ -239,6 +231,39 @@ export class ReceiptsService {
         }
     }
 
+    async findAllPendingReceipts(customerType: CustomerType) {
+      try {
+        const customers = await this.customerRepository.find({
+          where: { customerType: customerType },
+          relations: ['receipts'],
+        });
+    
+        // Array para almacenar los recibos pendientes de todos los clientes
+        const pendingReceipts = [];
+    
+        for (const customer of customers) {
+          const receipts = customer.receipts.sort(
+            (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+          );
+    
+          // Filtrar solo los recibos con estado 'PENDING'
+          const customerPendingReceipts = receipts.filter(
+            (receipt) => receipt.status === 'PENDING'
+          );
+    
+          // Agregar los recibos pendientes al array general
+          pendingReceipts.push(...customerPendingReceipts);
+        }
+    
+        return pendingReceipts;
+      } catch (error) {
+        if (!(error instanceof NotFoundException)) {
+          this.logger.error(error.message, error.stack);
+        }
+        throw error;
+      }
+    }
+    
     async numberGeneratorForAllCustomer(customerId: string){
         try{
             const customer = await this.customerRepository.findOne({ 

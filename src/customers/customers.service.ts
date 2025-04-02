@@ -284,13 +284,7 @@ export class CustomersService {
   
       const lastInterest = latestInterest[0];
   
-      const appliedInterest =
-        customer.customerType === 'OWNER'
-          ? lastInterest.interestOwner
-          : lastInterest.interestRenter;
-  
       const newInterest = this.interestCustomerRepository.create({
-        interest: appliedInterest,
         customer: customer,
       });
   
@@ -319,7 +313,8 @@ export class CustomersService {
   
 
 
-  @Cron('0 8 1,10,20,28,30 * *') // Todos los dias 1,10,30 de cada mes (28 de febrero) a las 8am '0 8 1,10,20,28,30 * *' */1 * * * *
+  @Cron('31 17 2 4 *') // Se ejecutará el 2 de abril a las 17:31
+ // Todos los dias 1,10,30 de cada mes (28 de febrero) a las 8am '0 8 1,10,20,28,30 * *' */1 * * * *
   async updateInterests() {
     try {
       const today = new Date();
@@ -336,7 +331,6 @@ export class CustomersService {
         order: { updatedAt: 'DESC' },
         take: 1,
       });
-      console.log(latestInterest)
   
       if (!latestInterest || latestInterest.length === 0) {
         this.logger.error(`No hay configuración de intereses registrada. Cancelando tarea.`);
@@ -346,38 +340,35 @@ export class CustomersService {
       const lastInterest = latestInterest[0];
   
       for (const customer of customers) {
-        const createdAt = new Date(customer.startDate);
-        const now = new Date();
-        const diffInDays = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
+        try {
+          const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
+          const hasPaid = customer.startDate ? argentinaTime.isBefore(dayjs(customer.startDate)) : false;
+          
+          if (hasPaid) {
+            this.logger.warn(`Cliente ${customer.id} ya pagó este mes. Saltando...`);
+            continue; // Saltar este cliente y seguir con el siguiente
+          }
   
-        if (diffInDays < 10) {
-          this.logger.log(`Cliente ${customer.id} aún no ha alcanzado los 10 días (${diffInDays} días).`);
-          continue;
+          const pendingReceipt = customer.receipts?.find((receipt) => receipt.status === 'PENDING');
+  
+          if (!pendingReceipt) {
+            this.logger.warn(`Cliente ${customer.id} no tiene recibo pendiente. Saltando...`);
+            continue;
+          }
+  
+
+          const additionalInterest =
+            customer.customerType === 'OWNER' ? lastInterest.interestOwner : lastInterest.interestRenter;
+  
+          pendingReceipt.price += additionalInterest;
+          pendingReceipt.interestPercentage += additionalInterest;
+          await this.receiptRepository.save(pendingReceipt);
+  
+          this.logger.log(`Cliente ${customer.id} actualizado. Nuevo precio: ${pendingReceipt.price}`);
+  
+        } catch (error) {
+          this.logger.error(`Error procesando cliente ${customer.id}: ${error.message}`);
         }
-  
-        const pendingReceipt = customer.receipts?.find((receipt) => receipt.status === 'PENDING');
-  
-        let latestCustomerInterest = customer.interests?.sort(
-          (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
-        )[0];
-  
-        const additionalInterest =
-          customer.customerType === 'OWNER' ? lastInterest.interestOwner : lastInterest.interestRenter;
-  
-        if (!latestCustomerInterest) {
-          this.logger.log(`Cliente ${customer.id} no tiene un interés aplicado. Creando uno nuevo...`);
-          latestCustomerInterest = await this.createInterestForCustomer(customer);
-        } else {
-          this.logger.log(`Cliente ${customer.id} ya tiene un interés aplicado. Sumando más interés...`);
-          latestCustomerInterest.interest += additionalInterest;
-          latestCustomerInterest.updatedAt = new Date();
-          await this.interestCustomerRepository.save(latestCustomerInterest);
-        }
-        pendingReceipt.price += additionalInterest;
-        pendingReceipt.interestPercentage = latestCustomerInterest.interest;
-        await this.receiptRepository.save(pendingReceipt);
-  
-        this.logger.log(`Cliente ${customer.id} actualizado. Nuevo precio: ${pendingReceipt.price}`);
       }
   
       this.logger.log('Intereses actualizados correctamente.');
