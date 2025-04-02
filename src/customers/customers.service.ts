@@ -50,6 +50,8 @@ export class CustomersService {
 
     async create(createCustomerDto: CreateCustomerDto) {
       try {
+
+        this.updateDates();
     
         const customer = this.customerRepository.create({
           ...createCustomerDto,
@@ -500,6 +502,21 @@ async removeParkingType(parkingTypeId: string) {
     }
     throw error;
   }
+}
+
+async updateDates(){
+  const customers = await this.customerRepository.find({ relations: ['interests', 'receipts'] });
+
+  for(const customer of customers){
+    const nextMonthStartDate = dayjs().tz('America/Argentina/Buenos_Aires').month(3).startOf('month').format('YYYY-MM-DD');
+    customer.startDate = nextMonthStartDate;
+
+    const pendingReceipt = customer.receipts?.find((receipt) => receipt.status === 'PENDING');
+    pendingReceipt.startDate= nextMonthStartDate;
+    await this.customerRepository.save(customer);
+    await this.receiptRepository.save(pendingReceipt);
+  }
+
 }
 
 }
