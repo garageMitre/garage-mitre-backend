@@ -50,8 +50,6 @@ export class CustomersService {
 
     async create(createCustomerDto: CreateCustomerDto) {
       try {
-
-        this.updateDates();
     
         const customer = this.customerRepository.create({
           ...createCustomerDto,
@@ -317,7 +315,7 @@ export class CustomersService {
   
 
 
-  @Cron('59 17 2 4 *', { timeZone: 'America/Argentina/Buenos_Aires' }) // Se ejecutará el 2 de abril a las 17:31
+  @Cron('0 8 1,10,20,28,30 * *', { timeZone: 'America/Argentina/Buenos_Aires' }) // Se ejecutará el 2 de abril a las 17:31
  // Todos los dias 1,10,30 de cada mes (28 de febrero) a las 8am '0 8 1,10,20,28,30 * *' */1 * * * *
   async updateInterests() {
     try {
@@ -503,21 +501,5 @@ async removeParkingType(parkingTypeId: string) {
     throw error;
   }
 }
-
-async updateDates(){
-  const customers = await this.customerRepository.find({ relations: ['interests', 'receipts'] });
-
-  for(const customer of customers){
-    const nextMonthStartDate = dayjs().tz('America/Argentina/Buenos_Aires').month(3).startOf('month').format('YYYY-MM-DD');
-    customer.startDate = nextMonthStartDate;
-
-    const pendingReceipt = customer.receipts?.find((receipt) => receipt.status === 'PENDING');
-    pendingReceipt.startDate= nextMonthStartDate;
-    await this.customerRepository.save(customer);
-    await this.receiptRepository.save(pendingReceipt);
-  }
-
-}
-
 }
 
