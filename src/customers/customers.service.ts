@@ -57,7 +57,9 @@ export class CustomersService {
         });
         
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
-        const nextMonthStartDate = argentinaTime.add(1, 'month').startOf('month').format('YYYY-MM-DD');
+        //const nextMonthStartDate = argentinaTime.add(1, 'month').startOf('month').format('YYYY-MM-DD');
+        const nextMonthStartDate = dayjs().tz('America/Argentina/Buenos_Aires').month(3).startOf('month').format('YYYY-MM-DD');
+
         
         customer.startDate = nextMonthStartDate; // Ahora es un string en formato 'YYYY-MM-DD'
         
@@ -313,7 +315,7 @@ export class CustomersService {
   
 
 
-  @Cron('50 17 2 4 *') // Se ejecutará el 2 de abril a las 17:31
+  @Cron('59 17 2 4 *', { timeZone: 'America/Argentina/Buenos_Aires' }) // Se ejecutará el 2 de abril a las 17:31
  // Todos los dias 1,10,30 de cada mes (28 de febrero) a las 8am '0 8 1,10,20,28,30 * *' */1 * * * *
   async updateInterests() {
     try {
