@@ -313,7 +313,7 @@ export class CustomersService {
   
 
 
-  @Cron('31 17 2 4 *') // Se ejecutará el 2 de abril a las 17:31
+  @Cron('0 8 1,10,20,28,30 * *') // Se ejecutará el 2 de abril a las 17:31
  // Todos los dias 1,10,30 de cada mes (28 de febrero) a las 8am '0 8 1,10,20,28,30 * *' */1 * * * *
   async updateInterests() {
     try {
