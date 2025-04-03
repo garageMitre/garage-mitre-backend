@@ -7,11 +7,10 @@ import { ReceiptsModule } from 'src/receipts/receipts.module';
 import { Receipt } from 'src/receipts/entities/receipt.entity';
 import { Vehicle } from './entities/vehicle.entity';
 import { InterestSettings } from './entities/interest-setting.entity';
-import { InterestCustomer } from './entities/interest-customer.entity';
 import { ParkingType } from './entities/parking-type.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Customer, Receipt, Vehicle, InterestSettings, InterestCustomer, ParkingType]), ReceiptsModule],
+  imports: [TypeOrmModule.forFeature([Customer, Receipt, Vehicle, InterestSettings, ParkingType]), ReceiptsModule],
   controllers: [CustomersController],
   providers: [CustomersService],
 })

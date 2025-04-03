@@ -236,6 +236,7 @@ export class ReceiptsService {
         const customers = await this.customerRepository.find({
           where: { customerType: customerType },
           relations: ['receipts'],
+          withDeleted: true
         });
     
         // Array para almacenar los recibos pendientes de todos los clientes

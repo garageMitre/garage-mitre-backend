@@ -13,7 +13,6 @@ import {
   } from 'typeorm';
 import { Receipt } from 'src/receipts/entities/receipt.entity';
 import { Vehicle } from './vehicle.entity';
-import { InterestCustomer } from './interest-customer.entity';
 
 export const CUSTOMER_TYPE = ['OWNER', 'RENTER', 'PRIVATE'] as const;
 export type CustomerType = (typeof CUSTOMER_TYPE)[number];
@@ -55,9 +54,6 @@ export type CustomerType = (typeof CUSTOMER_TYPE)[number];
 
     @OneToMany(() => Receipt, (receipts) => receipts.customer, {cascade: true})
     receipts: Receipt[];
-
-    @OneToMany(() => InterestCustomer, (interest) => interest.customer, { cascade: true })
-    interests: InterestCustomer[];
   
     @DeleteDateColumn()
     deletedAt: Date;

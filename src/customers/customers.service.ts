@@ -13,7 +13,6 @@ import { InterestSettings } from './entities/interest-setting.entity';
 import { CreateInterestSettingDto } from './dto/interest-setting.dto';
 import { Cron } from '@nestjs/schedule';
 import { isUUID } from 'class-validator';
-import { InterestCustomer } from './entities/interest-customer.entity';
 import { UpdateAmountAllCustomerDto } from './dto/update-amount-all-customers.dto';
 import { ParkingType } from './entities/parking-type.entity';
 import { CreateParkingTypeDto } from './dto/create-parking-type.dto';
@@ -43,8 +42,6 @@ export class CustomersService {
       private readonly receiptRepository: Repository<Receipt>,
       @InjectRepository(InterestSettings)
       private readonly interestSettingsRepository: Repository<InterestSettings>,
-      @InjectRepository(InterestCustomer)
-      private readonly interestCustomerRepository: Repository<InterestCustomer>,
       private readonly receiptsService: ReceiptsService
     ) {}
 
@@ -117,7 +114,9 @@ export class CustomersService {
     try {
       const customers = await this.customerRepository.find({
         relations: ['receipts', 'vehicles', 'vehicles.parkingType'],
-        where: {customerType : customer}})
+        where: {customerType : customer},
+        withDeleted: true
+      })
 
         return customers;
     } catch (error) {
@@ -129,7 +128,8 @@ export class CustomersService {
     try {
       const customer = await this.customerRepository.findOne({
         where: { id },
-        relations: ['receipts', 'interests', 'vehicles','vehicles.parkingType'],
+        relations: ['receipts','vehicles','vehicles.parkingType'],
+        withDeleted: true
       });
   
       if (!customer) {
@@ -243,7 +243,7 @@ export class CustomersService {
 
   async remove(id: string) {
     try{
-      const customer = await this.customerRepository.findOne({where:{id:id}})
+      const customer = await this.customerRepository.findOne({where:{id:id}, withDeleted: true})
 
       if(!customer){
         throw new NotFoundException( `Customer ${customer.customerType} not found`)
@@ -260,6 +260,67 @@ export class CustomersService {
     }
   }
 
+  async softDelete(id: string) {
+    try{
+      const customer = await this.customerRepository.findOne({
+        where: { id },
+        relations: ['vehicles', 'receipts'],
+      });
+
+      if(!customer){
+        throw new NotFoundException( `Customer ${customer.customerType} not found`)
+      }
+      for(const vechile of customer.vehicles){
+        await this.vehicleRepository.softDelete(vechile.id);
+      }
+
+      for(const receipt of customer.receipts){
+        await this.receiptRepository.softDelete(receipt.id);
+      }
+
+      await this.customerRepository.softDelete(customer.id);
+
+      return {message: 'Customer removed successfully'}
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) {
+        this.logger.error(error.message, error.stack);
+      }
+      throw error;
+    }
+  }
+
+  async restoredCustomer(id: string) {
+    try{
+      const customer = await this.customerRepository.findOne({
+        where: { id },
+        relations: ['vehicles', 'receipts'],
+        withDeleted: true
+      });
+
+      if(!customer){
+        throw new NotFoundException( `Customer ${customer.customerType} not found`)
+      }
+      for(const vechile of customer.vehicles){
+        vechile.deletedAt = null;
+        await this.vehicleRepository.save(vechile);
+      }
+
+      for(const receipt of customer.receipts){
+        receipt.deletedAt = null;
+        await this.receiptRepository.save(receipt);
+      }
+      customer.deletedAt = null;
+      await this.customerRepository.save(customer);
+
+      return {message: 'Customer restored successfully'}
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) {
+        this.logger.error(error.message, error.stack);
+      }
+      throw error;
+    }
+  }
+
   async createInterest(createInterestSettingDto: CreateInterestSettingDto) {
     try {
       await this.interestSettingsRepository.clear();
@@ -268,33 +329,6 @@ export class CustomersService {
       return interest;
     } catch (error) {
       this.logger.error(error.message, error.stack);
-      throw error;
-    }
-  }
-
-  async createInterestForCustomer(customer: Customer): Promise<InterestCustomer> {
-    try {
-      const latestInterest = await this.interestSettingsRepository.find({
-        order: { updatedAt: 'DESC' },
-        take: 1,
-      });
-
-  
-      if (latestInterest.length === 0) {
-        throw new NotFoundException(`No interest settings found`);
-      }
-  
-      const lastInterest = latestInterest[0];
-  
-      const newInterest = this.interestCustomerRepository.create({
-        customer: customer,
-      });
-  
-      await this.interestCustomerRepository.save(newInterest);
-  
-      return newInterest;
-    } catch (error) {
-      this.logger.error(`Error al crear interés para el cliente ${customer.id}: ${error.message}`);
       throw error;
     }
   }

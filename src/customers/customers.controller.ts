@@ -42,6 +42,16 @@ export class CustomersController {
     return this.customersService.remove(id);
   }
 
+  @Delete('softDelete/:id')
+  softDelete(@Param('id') id: string) {
+    return this.customersService.softDelete(id);
+  }
+
+  @Patch('restoredCustomer/:id')
+  restoredCustomer(@Param('id') id: string) {
+    return this.customersService.restoredCustomer(id);
+  }
+
   @Post('interestSetting')
   async createInterest(@Body() createInterestSettingDto: CreateInterestSettingDto) {
     return await this.customersService.createInterest(createInterestSettingDto);

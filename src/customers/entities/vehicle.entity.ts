@@ -4,6 +4,7 @@ import {
     ManyToOne,
     PrimaryGeneratedColumn,
     OneToOne,
+    DeleteDateColumn,
   } from 'typeorm';
   import { Customer } from './customer.entity';
 import { ParkingType } from './parking-type.entity';
@@ -29,5 +30,8 @@ import { ParkingType } from './parking-type.entity';
   
     @ManyToOne(() => Customer, (customer) => customer.vehicles, { onDelete: 'CASCADE' })
     customer: Customer;
+
+    @DeleteDateColumn()
+    deletedAt: Date;
   }
   

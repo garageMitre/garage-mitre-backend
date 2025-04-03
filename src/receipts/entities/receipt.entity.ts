@@ -1,6 +1,7 @@
 import {
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   Entity,
   JoinColumn,
   ManyToOne,
@@ -64,4 +65,7 @@ export class Receipt {
 
   @UpdateDateColumn()
   updateAt: Date;
+
+  @DeleteDateColumn()
+  deletedAt: Date;
 }
