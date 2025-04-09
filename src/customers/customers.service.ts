@@ -22,6 +22,10 @@ import * as dayjs from 'dayjs';
 import * as utc from 'dayjs/plugin/utc';
 import * as timezone from 'dayjs/plugin/timezone';
 import * as isBetween from 'dayjs/plugin/isBetween'; 
+import { NotificationGateway } from 'src/notes/notification-gateway';
+import { v4 as uuidv4 } from 'uuid'; 
+import { NotificationInterestGateway } from './notification-interest-gateway';
+
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -42,7 +46,8 @@ export class CustomersService {
       private readonly receiptRepository: Repository<Receipt>,
       @InjectRepository(InterestSettings)
       private readonly interestSettingsRepository: Repository<InterestSettings>,
-      private readonly receiptsService: ReceiptsService
+      private readonly receiptsService: ReceiptsService,
+      private readonly notificationGateway: NotificationInterestGateway,
     ) {}
 
     async create(createCustomerDto: CreateCustomerDto) {
@@ -361,7 +366,7 @@ export class CustomersService {
   
       this.logger.log('⏳ Verificando y actualizando intereses de clientes...');
   
-      const customers = await this.customerRepository.find({ relations: ['interests', 'receipts'] });
+      const customers = await this.customerRepository.find({ relations: ['receipts'] });
   
       const latestInterest = await this.interestSettingsRepository.find({
         order: { updatedAt: 'DESC' },
@@ -399,6 +404,25 @@ export class CustomersService {
           pendingReceipt.price += additionalInterest;
           pendingReceipt.interestPercentage += additionalInterest;
           await this.receiptRepository.save(pendingReceipt);
+          const customerTypeMap = {
+            OWNER: 'Propietario',
+            RENTER: 'Inquilino',
+            PRIVATE: 'Estacionamiento privado',
+          };
+          
+          const readableCustomerType = customerTypeMap[customer.customerType] || customer.customerType;
+
+          const notificationId = uuidv4();
+          this.notificationGateway.sendNotification({
+            id: notificationId,
+            type: 'INTEREST_PROCESSED',
+            title: 'Interes Aplicado',
+            message: `Se aplico un interes al cliente de tipo ${readableCustomerType} ${customer.lastName} ${customer.firstName} de $${additionalInterest}.`,
+            customerType: customer.customerType,
+            customer: customer,
+            lastName: customer.lastName,
+            customerId: customer.id,
+          });
   
           this.logger.log(`Cliente ${customer.id} actualizado. Nuevo precio: ${pendingReceipt.price}`);
   

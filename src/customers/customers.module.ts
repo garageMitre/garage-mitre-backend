@@ -8,10 +8,12 @@ import { Receipt } from 'src/receipts/entities/receipt.entity';
 import { Vehicle } from './entities/vehicle.entity';
 import { InterestSettings } from './entities/interest-setting.entity';
 import { ParkingType } from './entities/parking-type.entity';
+import { NotificationGateway } from 'src/notes/notification-gateway';
+import { NotificationInterestGateway } from './notification-interest-gateway';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Customer, Receipt, Vehicle, InterestSettings, ParkingType]), ReceiptsModule],
   controllers: [CustomersController],
-  providers: [CustomersService],
+  providers: [CustomersService, NotificationInterestGateway],
 })
 export class CustomersModule {}
