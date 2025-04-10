@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Ticket } from './entities/ticket.entity';
@@ -131,14 +131,6 @@ export class TicketsService {
 
         const now = new Date();
         const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const getLocalTime = (date: Date): string => {
-            return date.toLocaleTimeString('es-AR', {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: false,
-            });
-        };
 
         if (!existingRegistration) {
             const argentinaTime = (dayjs().tz('America/Argentina/Buenos_Aires') as dayjs.Dayjs);
@@ -203,44 +195,56 @@ async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRe
 
 async updateRegistration(existingRegistration: TicketRegistration, now: Date, formattedDay: Date, ticket: Ticket) {
     try {
-        const getLocalTime = (date: Date): string => {
-            return date.toLocaleTimeString('es-AR', {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: false,
-            });
-        };
 
-        const localTime = getLocalTime(now);
+      const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
+      const [hours, minutes, seconds] = existingRegistration.entryTime.split(':').map(Number);
 
-        const timeToMinutes = (time: string): number => {
-            const [hours, minutes] = time.split(':').map(Number);
-            return hours * 60 + minutes;
-        };
+      const createdAt = argentinaTime.clone().set('hour', hours).set('minute', minutes).set('second', seconds);
 
-        const entryMinutes = timeToMinutes(existingRegistration.entryTime);
-        const departureMinutes = timeToMinutes(localTime);
-
-        const diffMinutes = departureMinutes - entryMinutes;
-        const hours = Math.ceil((diffMinutes - 5) / 60);
-        const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
-        const isDaytime = argentinaTime.isBetween(dayjs(argentinaTime).startOf('day').hour(6), dayjs(argentinaTime).startOf('day').hour(19), null, '[)');
-
-        if(isDaytime){
-          ticket.price = ticket.dayPrice;
-        }else{
-          ticket.price = ticket.nightPrice;
+      if (!createdAt.isValid()) {
+        throw new BadRequestException('Invalid entryTime format');
+      }
+      // Minutos desde la creación
+      const minutesPassed = argentinaTime.diff(createdAt, 'minute');
+      
+      if (minutesPassed < 5) {
+        ticket.price = 0;
+      } else {
+        const isDaytime = argentinaTime.isBetween(
+          dayjs(argentinaTime).startOf('day').hour(6),
+          dayjs(argentinaTime).startOf('day').hour(19),
+          null,
+          '[)'
+        );
+      
+        const basePrice = isDaytime ? ticket.dayPrice : ticket.nightPrice;
+      
+        // Tarifa por bloques de 1h con tolerancia de 5 min
+        const blockDuration = 60; // 1 hora
+        const tolerance = 5;
+        const totalAllowed = blockDuration + tolerance;
+      
+        let multiplier = 1;
+      
+        if (minutesPassed > totalAllowed) {
+          // Restamos la primera hora con tolerancia, y luego calculamos los bloques
+          const extraMinutes = minutesPassed - totalAllowed;
+          const extraBlocks = Math.floor(extraMinutes / blockDuration) + 1;
+          multiplier += extraBlocks;
         }
-
-       await this.ticketRepository.save(ticket)
-    
-        const price = diffMinutes < 5 ? 0 : Math.max(hours, 1) * ticket.price;
+      
+        ticket.price = basePrice * multiplier;
+      }
+      
+      await this.ticketRepository.save(ticket);
+      console.log('ENTRY TIME:', createdAt.format());
+console.log('NOW:', argentinaTime.format());
+console.log('MINUTES PASSED:', minutesPassed);
 
 
         const updateTicketRegistrationDto: UpdateTicketRegistrationDto = {
-            description: `Tipo: ${existingRegistration.ticket.vehicleType}, Ent: ${existingRegistration.entryTime}, Sal: ${localTime}`,
-            price: price,
+            description: `Tipo: ${existingRegistration.ticket.vehicleType}, Ent: ${existingRegistration.entryTime}, Sal: ${existingRegistration.departureTime}`,
+            price: ticket.price ,
             entryDay: existingRegistration.entryDay,
             entryTime: existingRegistration.entryTime,
             departureDay: argentinaTime.format('YYYY-MM-DD'),
@@ -262,10 +266,10 @@ async updateRegistration(existingRegistration: TicketRegistration, now: Date, fo
         if (!boxList) {
             boxList = await this.boxListsService.createBox({
                 date: boxListDate,
-                totalPrice: price
+                totalPrice: ticket.price
             });
         } else {
-            boxList.totalPrice += price;
+            boxList.totalPrice += ticket.price;
 
             await this.boxListsService.updateBox(boxList.id, {
                 totalPrice: boxList.totalPrice,

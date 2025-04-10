@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { CreateCustomerDto, CreateVehicleDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Customer, CustomerType } from './entities/customer.entity';
 import { ReceiptsService } from 'src/receipts/receipts.service';
 import { addMonths, startOfMonth } from 'date-fns';
@@ -48,70 +48,79 @@ export class CustomersService {
       private readonly interestSettingsRepository: Repository<InterestSettings>,
       private readonly receiptsService: ReceiptsService,
       private readonly notificationGateway: NotificationInterestGateway,
+      private readonly dataSource: DataSource,
     ) {}
 
     async create(createCustomerDto: CreateCustomerDto) {
-      try {
+      const queryRunner = this.dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
     
-        const customer = this.customerRepository.create({
+      try {
+        const customerRepo = queryRunner.manager.getRepository(Customer);
+        const vehicleRepo = queryRunner.manager.getRepository(Vehicle);
+        const parkingTypeRepo = queryRunner.manager.getRepository(ParkingType);
+    
+        const customer = customerRepo.create({
           ...createCustomerDto,
           vehicles: [],
         });
-        
+    
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
-        //const nextMonthStartDate = argentinaTime.add(1, 'month').startOf('month').format('YYYY-MM-DD');
-        const nextMonthStartDate = dayjs().tz('America/Argentina/Buenos_Aires').month(3).startOf('month').format('YYYY-MM-DD');
-
-        
-        customer.startDate = nextMonthStartDate; // Ahora es un string en formato 'YYYY-MM-DD'
-        
-        
-        const savedCustomer = await this.customerRepository.save(customer);
+        const nextMonthStartDate = argentinaTime.month(3).startOf('month').format('YYYY-MM-DD');
+        customer.startDate = nextMonthStartDate;
+    
+        const savedCustomer = await customerRepo.save(customer);
     
         if (createCustomerDto.vehicles && createCustomerDto.vehicles.length > 0) {
           const vehicles = [];
-
+    
           for (const vehicleDto of createCustomerDto.vehicles) {
-            if(customer.customerType === 'OWNER'){
-              const parkingType = await this.parkingTypeRepository.findOne({
+            if (customer.customerType === 'OWNER') {
+              const parkingType = await parkingTypeRepo.findOne({
                 where: { parkingType: vehicleDto.parking },
               });
-      
+    
               if (!parkingType) {
                 throw new NotFoundException({
                   code: 'PARKING_TYPE_NOT_FOUND',
                   message: 'Parking type not found',
                 });
               }
-      
-              const vehicle = this.vehicleRepository.create({
+    
+              const vehicle = vehicleRepo.create({
                 ...vehicleDto,
-                parkingType, // opcional, depende si esperás la relación o solo el ID
+                parkingType,
                 amount: parkingType.amount,
                 customer: savedCustomer,
               });
+    
               vehicles.push(vehicle);
-              
-            }else{
-              const vehicle = this.vehicleRepository.create({
+            } else {
+              const vehicle = vehicleRepo.create({
                 ...vehicleDto,
                 parkingType: null,
                 customer: savedCustomer,
               });
+    
               vehicles.push(vehicle);
             }
-    
           }
     
-          await this.vehicleRepository.save(vehicles);
+          await vehicleRepo.save(vehicles);
         }
     
-        await this.receiptsService.createReceipt(savedCustomer.id);
+        // 👇 Aquí pasamos el manager para asegurar que el recibo se cree en la misma transacción
+        await this.receiptsService.createReceipt(savedCustomer.id, queryRunner.manager);
     
+        await queryRunner.commitTransaction();
         return savedCustomer;
       } catch (error) {
+        await queryRunner.rollbackTransaction();
         this.logger.error(error.message, error.stack);
         throw error;
+      } finally {
+        await queryRunner.release();
       }
     }
 
