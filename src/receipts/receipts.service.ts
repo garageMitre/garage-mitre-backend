@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Not, Repository } from 'typeorm';
+import { DataSource, EntityManager, Not, Repository } from 'typeorm';
 import { BoxListsService } from 'src/box-lists/box-lists.service';
 import { BoxList } from 'src/box-lists/entities/box-list.entity';
 import { addMonths, startOfMonth } from 'date-fns';
@@ -31,204 +31,233 @@ export class ReceiptsService {
         private readonly dataSource: DataSource,
     ) {}
 
-    async createReceipt(cutomerId: string): Promise<Receipt> {
-        try {
-            const customer = await this.customerRepository.findOne({ where: { id: cutomerId } });
-            if (!customer) {
-                throw new NotFoundException('Customer not found');
-            }
-
-            const totalVehicleAmount = customer.vehicles.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0);
-
-            const price = totalVehicleAmount;
-            const argentinaTime = (dayjs().tz('America/Argentina/Buenos_Aires') as dayjs.Dayjs);
-          
-            const receipt = this.receiptRepository.create({
-                customer,
-                price,
-                startAmount: price,
-                dateNow: argentinaTime.format('YYYY-MM-DD'),
-                startDate:customer.startDate
-            });
+    async createReceipt(customerId: string, manager: EntityManager): Promise<Receipt> {
+      try {
+        const customer = await manager.findOne(Customer, {
+          where: { id: customerId },
+          relations: ['vehicles'],
+        });
     
-            return await this.receiptRepository.save(receipt);
-        } catch (error) {
-            if (!(error instanceof NotFoundException)) {
-              this.logger.error(error.message, error.stack);
-            }
-            throw error;
-          }
+        if (!customer) {
+          throw new NotFoundException('Customer not found');
+        }
+    
+        const totalVehicleAmount = customer.vehicles.reduce(
+          (acc, vehicle) => acc + (vehicle.amount || 0),
+          0,
+        );
+    
+        const price = totalVehicleAmount;
+        const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
+    
+        const receipt = manager.create(Receipt, {
+          customer,
+          price,
+          startAmount: price,
+          dateNow: argentinaTime.format('YYYY-MM-DD'),
+          startDate: customer.startDate,
+        });
+    
+        return await manager.save(receipt);
+      } catch (error) {
+        if (!(error instanceof NotFoundException)) {
+          this.logger.error(error.message, error.stack);
+        }
+        throw error;
+      }
     }
     
 
     async updateReceipt(customerId: string, updateReceiptDto: UpdateReceiptDto) {
-      
-        try {
-          const customer = await this.customerRepository.findOne({
-            where: { id: customerId },
-            relations: ['receipts'],
+      const queryRunner = this.dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+    
+      try {
+        const customer = await queryRunner.manager.findOne(Customer, {
+          where: { id: customerId },
+          relations: ['receipts'],
+        });
+    
+        if (!customer) throw new NotFoundException('Customer not found');
+    
+        const receipt = await queryRunner.manager.findOne(Receipt, {
+          where: { customer: { id: customer.id }, status: 'PENDING' },
+        });
+    
+        if (!receipt) throw new NotFoundException('Receipt not found');
+    
+        const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
+        const hasPaid = customer.startDate ? argentinaTime.isBefore(dayjs(customer.startDate)) : false;
+    
+        if (hasPaid) {
+          throw new NotFoundException({
+            code: 'RECEIPT_PAID',
+            message: 'This bill was already paid this month.',
           });
-        
-          if (!customer) throw new NotFoundException('Customer not found');
-        
-          const receipt = await this.receiptRepository.findOne({
-            where: { customer: { id: customer.id }, status: 'PENDING' },
+        }
+    
+        const nextMonthStartDate = argentinaTime.add(1, 'month').startOf('month').format('YYYY-MM-DD');
+    
+        customer.previusStartDate = customer.startDate;
+        customer.startDate = nextMonthStartDate;
+    
+        await queryRunner.manager.save(Customer, customer);
+    
+        if (updateReceiptDto.print) {
+          const orderReceiptNumbers = await queryRunner.manager.find(Receipt, {
+            where: { receiptNumber: Not(IsNull()) },
+            order: { updateAt: 'DESC' },
+            take: 1,
           });
-        
-          if (!receipt) throw new NotFoundException('Receipt not found');
-        
-          const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
-          const hasPaid = customer.startDate ? argentinaTime.isBefore(dayjs(customer.startDate)) : false;
-        
-          if (hasPaid) {
-            throw new NotFoundException({
-              code: 'RECEIPT_PAID',
-              message: 'This bill was already paid this month.',
-            });
-          }
-        
-          const nextMonthStartDate = argentinaTime.add(1, 'month').startOf('month').format('YYYY-MM-DD');
-        
-          customer.previusStartDate = customer.startDate;
-          customer.startDate = nextMonthStartDate;
-        
-          await this.customerRepository.save(customer); // Se actualiza el customer
-        
-          if (updateReceiptDto.print) {
-            const orderReceiptNumbers = await this.receiptRepository.find({
-              where: { receiptNumber: Not(IsNull()) },
-              order: { updateAt: 'DESC' },
-              take: 1,
-            });
-        
-            if (orderReceiptNumbers.length > 0 && orderReceiptNumbers[0].receiptNumber) {
-              const lastReceiptNumber = orderReceiptNumbers[0].receiptNumber;
-              const [shortNumber, longNumber] = lastReceiptNumber.split('-').map(num => num.replace('N° ', '').trim());
-        
-              const incrementedShortNumber = parseInt(shortNumber).toString().padStart(4, '0');
-              const incrementedLongNumber = (parseInt(longNumber) + 1).toString().padStart(8, '0');
-        
-              receipt.receiptNumber = `N° ${incrementedShortNumber}-${incrementedLongNumber}`;
-            } else {
-              receipt.receiptNumber = 'N° 0000-00000001';
-            }
-          }
-        
-          receipt.status = 'PAID';
-          receipt.paymentType = updateReceiptDto.paymentType;
-          receipt.paymentDate = argentinaTime.format('YYYY-MM-DD');
-          receipt.dateNow = argentinaTime.format('YYYY-MM-DD');
-        
-          const now = new Date();
-          const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        
-          let boxList = await this.boxListsService.findBoxByDate(formattedDay);
-        
-          if (!boxList) {
-            boxList = await this.boxListsService.createBox({
-              date: formattedDay,
-              totalPrice: receipt.paymentType === 'CASH' ? receipt.price : -receipt.price,
-            });
+    
+          if (orderReceiptNumbers.length > 0 && orderReceiptNumbers[0].receiptNumber) {
+            const lastReceiptNumber = orderReceiptNumbers[0].receiptNumber;
+            const [shortNumber, longNumber] = lastReceiptNumber.split('-').map(num => num.replace('N° ', '').trim());
+    
+            const incrementedShortNumber = parseInt(shortNumber).toString().padStart(4, '0');
+            const incrementedLongNumber = (parseInt(longNumber) + 1).toString().padStart(8, '0');
+    
+            receipt.receiptNumber = `N° ${incrementedShortNumber}-${incrementedLongNumber}`;
           } else {
-            boxList.totalPrice += receipt.paymentType === 'CASH' ? receipt.price : -receipt.price;
-            await this.boxListsService.updateBox(boxList.id, {
-              totalPrice: boxList.totalPrice,
-            });
+            receipt.receiptNumber = 'N° 0000-00000001';
           }
-        
-          receipt.boxList = { id: boxList.id } as BoxList;
-          await this.receiptRepository.save(receipt); // Se actualiza el receipt con los nuevos datos
-        
-          // Se crea el nuevo recibo con la info actualizada del customer
-          await this.createReceipt(customer.id);
-        
-          return receipt;
-        } catch (error) {
-          if (!(error instanceof NotFoundException)) {
-            this.logger.error(error.message, error.stack);
-          }
-          throw error;
         }
+    
+        receipt.status = 'PAID';
+        receipt.paymentType = updateReceiptDto.paymentType;
+        receipt.paymentDate = argentinaTime.format('YYYY-MM-DD');
+        receipt.dateNow = argentinaTime.format('YYYY-MM-DD');
+    
+        const now = new Date();
+        const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+        let boxList = await this.boxListsService.findBoxByDate(formattedDay, queryRunner.manager);
+    
+        if (!boxList) {
+          boxList = await this.boxListsService.createBox({
+            date: formattedDay,
+            totalPrice: receipt.paymentType === 'CASH' ? receipt.price : -receipt.price,
+          }, queryRunner.manager);
+        } else {
+          boxList.totalPrice += receipt.paymentType === 'CASH' ? receipt.price : -receipt.price;
+          await this.boxListsService.updateBox(boxList.id, {
+            totalPrice: boxList.totalPrice,
+          }, queryRunner.manager);
+        }
+    
+        receipt.boxList = { id: boxList.id } as BoxList;
+        await queryRunner.manager.save(Receipt, receipt);
+    
+        // Crear el nuevo recibo dentro de la misma transacción
+        await this.createReceipt(customer.id, queryRunner.manager);
+    
+        await queryRunner.commitTransaction();
+        return receipt;
+      } catch (error) {
+        await queryRunner.rollbackTransaction();
+        if (!(error instanceof NotFoundException)) {
+          this.logger.error(error.message, error.stack);
+        }
+        throw error;
+      } finally {
+        await queryRunner.release();
       }
-
+    }
+    
     async cancelReceipt(customerId: string) {
-        try {
-            const customer = await this.customerRepository.findOne({
-                where: { id: customerId },
-                relations: ['receipts'],
-            });
+      const queryRunner = this.dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
     
-            if (!customer) {
-                throw new NotFoundException('Customer not found');
-            }
-            customer.startDate = customer.previusStartDate;
-            customer.previusStartDate = dayjs(customer.previusStartDate)
-              .subtract(1, 'month')
-              .format('YYYY-MM-DD');
-            await this.customerRepository.save(customer);
-            const receipts = customer.receipts.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      try {
+        const customerRepo = queryRunner.manager.getRepository(Customer);
+        const receiptRepo = queryRunner.manager.getRepository(Receipt);
     
-            if (receipts.length === 0) {
-                throw new NotFoundException({
-                    code: 'RECEIPT_PAID_NOT_FOUND',
-                    message: 'No receipts found for this owner',
-                  });
-            }
+        const customer = await customerRepo.findOne({
+          where: { id: customerId },
+          relations: ['receipts'],
+        });
     
-            const pendingReceipt = receipts.find((receipt) => receipt.status === 'PENDING');
-            const lastPaidReceipt = receipts.find(
-                (receipt, index) => receipt.status === 'PAID' && receipts[index - 1]?.status === 'PENDING'
-            );
-            if (!lastPaidReceipt) {
-                throw new NotFoundException({
-                    code: 'RECEIPT_PAID_NOT_FOUND',
-                    message: 'No receipts found for this owner',
-                  });
-            }
-            if (!pendingReceipt) {
-                throw new NotFoundException('No pending receipt found for this owner');
-            }
-    
-            const now = new Date();
-            const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            const boxListDate = formattedDay;
-    
-            let boxList = await this.boxListsService.findBoxByDate(boxListDate);
-    
-            if (!boxList) {
-                throw new NotFoundException('Box list not found');
-            }
-            if(lastPaidReceipt.paymentType === 'TRANSFER'){
-                boxList.totalPrice += lastPaidReceipt.price;
-            }else{
-                boxList.totalPrice -= lastPaidReceipt.price;
-            }
-    
-    
-            await this.boxListsService.updateBox(boxList.id, {
-                totalPrice: boxList.totalPrice,
-            });
-    
-            await this.receiptRepository.remove(pendingReceipt);
-    
-            if (lastPaidReceipt) {
-                lastPaidReceipt.status = 'PENDING';
-                lastPaidReceipt.paymentDate = null;
-                lastPaidReceipt.boxList = null;
-                lastPaidReceipt.receiptNumber = null;
-                lastPaidReceipt.paymentType = null;
-    
-                await this.receiptRepository.save(lastPaidReceipt);
-            }
-
-    
-            return customer;
-        } catch (error) {
-            if (!(error instanceof NotFoundException)) {
-                this.logger.error(error.message, error.stack);
-            }
-            throw error;
+        if (!customer) {
+          throw new NotFoundException('Customer not found');
         }
+    
+        customer.startDate = dayjs(customer.startDate)
+        .subtract(1, 'month')
+        .format('YYYY-MM-DD');
+        
+        if (!customer.startDate) {
+          throw new BadRequestException('startDate is required to calculate previousStartDate');
+        }
+        
+        customer.previusStartDate = dayjs(customer.startDate)
+          .subtract(1, 'month')
+          .format('YYYY-MM-DD');
+    
+        await customerRepo.save(customer);
+    
+        const receipts = customer.receipts.sort(
+          (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+        );
+    
+        const pendingReceipt = receipts.find((r) => r.status === 'PENDING');
+        const lastPaidReceipt = receipts.find(
+          (r, i) => r.status === 'PAID' && receipts[i - 1]?.status === 'PENDING'
+        );
+    
+        if (!lastPaidReceipt) {
+          throw new NotFoundException({
+            code: 'RECEIPT_PAID_NOT_FOUND',
+            message: 'No receipts paid found',
+          });
+        }
+    
+        if (!pendingReceipt) {
+          throw new NotFoundException('No pending receipt found for this owner');
+        }
+    
+        const now = new Date();
+        const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const boxListDate = formattedDay;
+    
+        let boxList = await this.boxListsService.findBoxByDate(boxListDate, queryRunner.manager);
+    
+        if (!boxList) {
+          throw new NotFoundException('Box list not found');
+        }
+    
+        if (lastPaidReceipt.paymentType === 'TRANSFER') {
+          boxList.totalPrice += lastPaidReceipt.price;
+        } else {
+          boxList.totalPrice -= lastPaidReceipt.price;
+        }
+    
+        await this.boxListsService.updateBox(boxList.id, {
+          totalPrice: boxList.totalPrice,
+        }, queryRunner.manager);
+    
+        await receiptRepo.remove(pendingReceipt);
+    
+        lastPaidReceipt.status = 'PENDING';
+        lastPaidReceipt.paymentDate = null;
+        lastPaidReceipt.boxList = null;
+        lastPaidReceipt.receiptNumber = null;
+        lastPaidReceipt.paymentType = null;
+    
+        await receiptRepo.save(lastPaidReceipt);
+    
+        await queryRunner.commitTransaction();
+        return customer;
+      } catch (error) {
+        await queryRunner.rollbackTransaction();
+        if (!(error instanceof NotFoundException)) {
+          this.logger.error(error.message, error.stack);
+        }
+        throw error;
+      } finally {
+        await queryRunner.release();
+      }
     }
 
     async findAllPendingReceipts(customerType: CustomerType) {

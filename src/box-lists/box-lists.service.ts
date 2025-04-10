@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { CreateBoxListDto } from './dto/create-box-list.dto';
 import { UpdateBoxListDto } from './dto/update-box-list.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, Repository } from 'typeorm';
+import { Between, EntityManager, Repository } from 'typeorm';
 import { BoxList } from './entities/box-list.entity';
 import { CreateOtherPaymentDto } from './dto/create-other-payment.dto';
 import { OtherPayment } from './entities/other-payment.entity';
@@ -19,18 +19,19 @@ export class BoxListsService {
       private readonly otherPaymentepository: Repository<OtherPayment>,
     ) {}
 
-  async createBox(createBoxListDto: CreateBoxListDto) {
-    try{
-      const box = this.boxListRepository.create(createBoxListDto);
-
-      const savedBox = await this.boxListRepository.save(box); 
-
-      return savedBox;
-    } catch (error) {
-      this.logger.error(error.message, error.stack);
+    async createBox(createBoxListDto: CreateBoxListDto, manager?: EntityManager) {
+      try {
+        const repo = manager ? manager.getRepository(BoxList) : this.boxListRepository;
+    
+        const box = repo.create(createBoxListDto);
+        const savedBox = await repo.save(box); 
+    
+        return savedBox;
+      } catch (error) {
+        this.logger.error(error.message, error.stack);
+        throw error;
+      }
     }
-  }
-
   async getAllboxes(){
     try{
 
@@ -41,38 +42,41 @@ export class BoxListsService {
       this.logger.error(error.message, error.stack);
     }
   }
-
-  async updateBox(id: string, updateBoxListDto: UpdateBoxListDto) {
-    try{
-      const box = await this.boxListRepository.findOne({where:{id:id}})
-
-      if(!box){
-        throw new NotFoundException('Box not found')
+  async updateBox(id: string, updateBoxListDto: UpdateBoxListDto, manager?: EntityManager) {
+    try {
+      const repo = manager ? manager.getRepository(BoxList) : this.boxListRepository;
+  
+      const box = await repo.findOne({ where: { id } });
+  
+      if (!box) {
+        throw new NotFoundException('Box not found');
       }
-      
-      const updateBox = this.boxListRepository.merge(box, updateBoxListDto);
-
-      const savedBox = await this.boxListRepository.save(updateBox); 
-
+  
+      const updateBox = repo.merge(box, updateBoxListDto);
+      const savedBox = await repo.save(updateBox); 
+  
       return savedBox;
     } catch (error) {
       this.logger.error(error.message, error.stack);
+      throw error;
     }
   }
 
-  async findBoxByDate(date: Date): Promise<BoxList | null> {
+  async findBoxByDate(date: Date, manager?: EntityManager): Promise<BoxList | null> {
     try {
+      const repo = manager ? manager.getRepository(BoxList) : this.boxListRepository;
+  
       const startOfDay = new Date(date.setHours(0, 0, 0, 0));
       const endOfDay = new Date(date.setHours(23, 59, 59, 999));
   
-      const boxList = await this.boxListRepository.findOne({
+      const boxList = await repo.findOne({
         where: { date: Between(startOfDay, endOfDay) },
         relations: [
           'ticketRegistrations',
           'receipts',
           'receipts.customer',
           'otherPayments',
-          'ticketRegistrationForDays'  
+          'ticketRegistrationForDays'
         ],
       });
   
