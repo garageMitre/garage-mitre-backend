@@ -237,13 +237,9 @@ async updateRegistration(existingRegistration: TicketRegistration, now: Date, fo
       }
       
       await this.ticketRepository.save(ticket);
-      console.log('ENTRY TIME:', createdAt.format());
-console.log('NOW:', argentinaTime.format());
-console.log('MINUTES PASSED:', minutesPassed);
-
 
         const updateTicketRegistrationDto: UpdateTicketRegistrationDto = {
-            description: `Tipo: ${existingRegistration.ticket.vehicleType}, Ent: ${existingRegistration.entryTime}, Sal: ${existingRegistration.departureTime}`,
+            description: `Tipo: ${existingRegistration.ticket.vehicleType}, Ent: ${existingRegistration.entryTime}, Sal: ${argentinaTime.format('HH:mm:ss')}`,
             price: ticket.price ,
             entryDay: existingRegistration.entryDay,
             entryTime: existingRegistration.entryTime,

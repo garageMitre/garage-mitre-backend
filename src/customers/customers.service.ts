@@ -25,6 +25,7 @@ import * as isBetween from 'dayjs/plugin/isBetween';
 import { NotificationGateway } from 'src/notes/notification-gateway';
 import { v4 as uuidv4 } from 'uuid'; 
 import { NotificationInterestGateway } from './notification-interest-gateway';
+import { VehicleRenter } from './entities/vehicle-renter.entity';
 
 
 dayjs.extend(utc);
@@ -40,6 +41,8 @@ export class CustomersService {
       private readonly customerRepository: Repository<Customer>,
       @InjectRepository(Vehicle)
       private readonly vehicleRepository: Repository<Vehicle>,
+      @InjectRepository(VehicleRenter)
+      private readonly vehicleRenterRepository: Repository<VehicleRenter>,
       @InjectRepository(ParkingType)
       private readonly parkingTypeRepository: Repository<ParkingType>,
       @InjectRepository(Receipt)
@@ -59,11 +62,13 @@ export class CustomersService {
       try {
         const customerRepo = queryRunner.manager.getRepository(Customer);
         const vehicleRepo = queryRunner.manager.getRepository(Vehicle);
+        const vehicleRenterRepo = queryRunner.manager.getRepository(VehicleRenter);
         const parkingTypeRepo = queryRunner.manager.getRepository(ParkingType);
     
         const customer = customerRepo.create({
           ...createCustomerDto,
           vehicles: [],
+          vehicleRenters: []
         });
     
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
@@ -72,11 +77,14 @@ export class CustomersService {
     
         const savedCustomer = await customerRepo.save(customer);
     
-        if (createCustomerDto.vehicles && createCustomerDto.vehicles.length > 0) {
-          const vehicles = [];
+        const vehicles = [];
+        const vehiclesRenter = [];
     
-          for (const vehicleDto of createCustomerDto.vehicles) {
-            if (customer.customerType === 'OWNER') {
+        if (customer.customerType === 'OWNER' && createCustomerDto.vehicles?.length > 0 ||
+            customer.customerType !== 'OWNER' && createCustomerDto.vehicleRenters?.length > 0) {
+          
+          if (customer.customerType === 'OWNER') {
+            for (const vehicleDto of createCustomerDto.vehicles) {
               const parkingType = await parkingTypeRepo.findOne({
                 where: { parkingType: vehicleDto.parking },
               });
@@ -88,6 +96,16 @@ export class CustomersService {
                 });
               }
     
+              const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: vehicleDto.garageNumber } });
+              const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: vehicleDto.garageNumber } });
+    
+              if (existingGarageNumberOwner || existingGarageNumberRenter) {
+                throw new NotFoundException({
+                  code: 'GARAGE_NUMBER_ALREADY_EXIST',
+                  message: `El número de garage ${vehicleDto.garageNumber} ya se encuentra en uso`,
+                });
+              }
+    
               const vehicle = vehicleRepo.create({
                 ...vehicleDto,
                 parkingType,
@@ -96,38 +114,93 @@ export class CustomersService {
               });
     
               vehicles.push(vehicle);
-            } else {
-              const vehicle = vehicleRepo.create({
-                ...vehicleDto,
-                parkingType: null,
-                customer: savedCustomer,
-              });
-    
-              vehicles.push(vehicle);
             }
-          }
+            await vehicleRepo.save(vehicles);
     
-          await vehicleRepo.save(vehicles);
+          } else {
+            for (const vehicleRenterDto of createCustomerDto.vehicleRenters) {
+              if (vehicleRenterDto.owner !== 'GARAGE_MITRE') {
+                const vehicleOwner = await vehicleRepo.findOne({
+                  where: { id: vehicleRenterDto.owner },
+                  relations: ['customer'],
+                });
+    
+                if (!vehicleOwner) {
+                  throw new NotFoundException('Vehicle not found');
+                }
+    
+                const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: vehicleRenterDto.garageNumber } });
+                const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: vehicleRenterDto.garageNumber } });
+    
+                if (existingGarageNumberOwner || existingGarageNumberRenter) {
+                  throw new NotFoundException({
+                    code: 'GARAGE_NUMBER_ALREADY_EXIST',
+                    message: `El número de garage ${vehicleRenterDto.garageNumber} ya se encuentra en uso`,
+                  });
+                }
+    
+                const vehicle = vehicleRenterRepo.create({
+                  customer: savedCustomer,
+                  vehicle: vehicleOwner,
+                  amount: vehicleOwner.amountRenter || 0,
+                  garageNumber: vehicleOwner.garageNumber,
+                  owner: vehicleRenterDto.owner
+                });
+    
+                vehicleOwner.rentActive = true;
+                await vehicleRepo.save(vehicleOwner);
+    
+                vehiclesRenter.push(vehicle);
+              } else {
+                const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: vehicleRenterDto.garageNumber } });
+                const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: vehicleRenterDto.garageNumber } });
+    
+                if (existingGarageNumberOwner || existingGarageNumberRenter) {
+                  throw new NotFoundException({
+                    code: 'GARAGE_NUMBER_ALREADY_EXIST',
+                    message: `El número de garage ${vehicleRenterDto.garageNumber} ya se encuentra en uso`,
+                  });
+                }
+    
+                const vehicle = vehicleRenterRepo.create({
+                  ...vehicleRenterDto,
+                  owner: 'GARAGE_MITRE',
+                  customer: savedCustomer,
+                });
+    
+                vehiclesRenter.push(vehicle);
+              }
+            }
+            await vehicleRenterRepo.save(vehiclesRenter);
+          }
         }
     
-        // 👇 Aquí pasamos el manager para asegurar que el recibo se cree en la misma transacción
-        await this.receiptsService.createReceipt(savedCustomer.id, queryRunner.manager);
+        // ⚡️ Acá calculamos bien
+        const totalVehicleAmount =
+          customer.customerType === 'OWNER'
+            ? vehicles.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0)
+            : vehiclesRenter.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0);
+    
+        // 👇 Y pasamos el total correctamente
+        await this.receiptsService.createReceipt(savedCustomer.id, queryRunner.manager, totalVehicleAmount);
     
         await queryRunner.commitTransaction();
         return savedCustomer;
       } catch (error) {
         await queryRunner.rollbackTransaction();
+        console.error(error.stack);
         this.logger.error(error.message, error.stack);
         throw error;
       } finally {
         await queryRunner.release();
       }
     }
+    
 
   async findAll(customer: CustomerType){
     try {
       const customers = await this.customerRepository.find({
-        relations: ['receipts', 'vehicles', 'vehicles.parkingType'],
+        relations: ['receipts', 'vehicles', 'vehicles.parkingType', 'vehicleRenters','vehicleRenters.vehicle','vehicleRenters.vehicle.customer'],
         where: {customerType : customer},
         withDeleted: true
       })
@@ -142,7 +215,7 @@ export class CustomersService {
     try {
       const customer = await this.customerRepository.findOne({
         where: { id },
-        relations: ['receipts','vehicles','vehicles.parkingType'],
+        relations: ['receipts','vehicles','vehicles.parkingType', 'vehicles.vehicleRenters'],
         withDeleted: true
       });
   
@@ -165,104 +238,276 @@ export class CustomersService {
       throw error;
     }
   }
-  
-
   async update(id: string, updateCustomerDto: UpdateCustomerDto) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+  
     try {
-      const customer = await this.customerRepository.findOne({
+      const customerRepo = queryRunner.manager.getRepository(Customer);
+      const vehicleRepo = queryRunner.manager.getRepository(Vehicle);
+      const vehicleRenterRepo = queryRunner.manager.getRepository(VehicleRenter);
+      const parkingTypeRepo = queryRunner.manager.getRepository(ParkingType);
+      const receiptRepo = queryRunner.manager.getRepository(Receipt); // importante
+  
+      const customer = await customerRepo.findOne({
         where: { id },
-        relations: ['vehicles', 'receipts'], // Asegúrate de que las relaciones estén bien cargadas
+        relations: ['vehicles', 'receipts', 'vehicleRenters'],
       });
   
       if (!customer) {
         throw new NotFoundException(`Customer ${id} not found`);
       }
   
-      if (customer.vehicles.length > 0) {
-        await this.vehicleRepository.remove(customer.vehicles); // Eliminar vehículos previos
-        customer.vehicles = []; // Limpiar el array de vehículos
-      }
-  
-      if (updateCustomerDto.vehicles && updateCustomerDto.vehicles.length > 0) {
-        const vehicles = [];
-  
-        for (const vehicleDto of updateCustomerDto.vehicles) {
-          if (customer.customerType === 'OWNER') {
-            const parkingType = await this.parkingTypeRepository.findOne({
-              where: { parkingType: vehicleDto.parking },
+      // Desactivar rentActive de vehículos rentados
+      if (customer.vehicleRenters.length > 0) {
+        for (const vehicleRenter of customer.vehicleRenters) {
+          if (vehicleRenter.owner !== 'GARAGE_MITRE') {
+            const vehicleOwner = await vehicleRepo.findOne({
+              where: { id: vehicleRenter.owner },
             });
   
+            if (!vehicleOwner) {
+              throw new NotFoundException('Vehicle not found');
+            }
+  
+            if (vehicleOwner.rent === true) {
+              vehicleOwner.rentActive = false;
+              await queryRunner.manager.save(vehicleOwner);
+            }
+          }
+        }
+        await queryRunner.manager.remove(VehicleRenter, customer.vehicleRenters);
+
+      }
+  
+      if (
+        (customer.customerType === 'OWNER' && updateCustomerDto.vehicles?.length > 0) ||
+        (customer.customerType !== 'OWNER' && updateCustomerDto.vehicleRenters?.length > 0)
+      ) {
+        const vehicles = [];
+        const vehiclesRenter = [];
+      
+        if (customer.customerType === 'OWNER') {
+          const existingVehicles = await vehicleRepo.find({
+            where: { customer: { id: customer.id } },
+            relations: ['vehicleRenters'],
+          });
+          
+          // Crear el mapa para lookup rápido por id
+          const existingVehiclesMap = new Map(
+            existingVehicles.map((vehicle) => [vehicle.id, vehicle]),
+          );
+          
+          for (const vehicleDto of updateCustomerDto.vehicles) {
+            const oldVehicle = existingVehiclesMap.get(vehicleDto.id);
+          
+            if (!oldVehicle) {
+              throw new NotFoundException({
+                code: 'VEHICLE_NOT_FOUND',
+                message: 'Vehículo anterior no encontrado',
+              });
+            }
+          
+            const parkingType = await parkingTypeRepo.findOne({
+              where: { parkingType: vehicleDto.parking },
+            });
+          
             if (!parkingType) {
               throw new NotFoundException({
                 code: 'PARKING_TYPE_NOT_FOUND',
                 message: 'Parking type not found',
               });
             }
-            const vehicle = this.vehicleRepository.create({
-              ...vehicleDto,
-              customer: customer, // Relacionamos el cliente al vehículo
-              parkingType: parkingType, // Relacionamos el parkingType con el vehículo
+            const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: vehicleDto.garageNumber } });
+            const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: vehicleDto.garageNumber } });
+
+            if (
+              oldVehicle.garageNumber !== vehicleDto.garageNumber &&
+              (existingGarageNumberOwner || existingGarageNumberRenter)
+            ) {
+              throw new NotFoundException({
+                code: 'GARAGE_NUMBER_ALREADY_EXIST',
+                message: `El número de garage ${vehicleDto.garageNumber} ya se encuentra en uso`,
+              });
+            }
+            
+
+            if (!parkingType) {
+              throw new NotFoundException({
+                code: 'PARKING_TYPE_NOT_FOUND',
+                message: 'Parking type not found',
+              });
+            }
+          
+          
+          
+            if (oldVehicle.rent === true && vehicleDto.rent === false && oldVehicle.vehicleRenters.length > 0) {
+              throw new NotFoundException({
+                code: 'CUSTOMER_RENTER_RELATIONSHIP',
+                message: `El vehiculo del garage (${oldVehicle.garageNumber}) ya tiene un inquilino relacionado. Porfavor si desea cambiar esta opcion cambie
+                          el garage del inquilino relacionado`,
+              });
+            }
+          
+            const newVehicle = queryRunner.manager.create(Vehicle, {
+              garageNumber: vehicleDto.garageNumber,
+              rent: vehicleDto.rent,
+              parkingType,
               amount: parkingType.amount,
+              amountRenter: vehicleDto.amountRenter,
+              customer: customer,
             });
-  
-            vehicles.push(vehicle);
-          } else {
-            const vehicle = this.vehicleRepository.create({
-              ...vehicleDto,
-              customer: customer, // Relacionamos el cliente al vehículo
-              parkingType: null,
+          
+            await queryRunner.manager.save(Vehicle, newVehicle);
+            vehicles.push(newVehicle);
+          
+            if (oldVehicle?.vehicleRenters?.length > 0) {
+              for (const renter of oldVehicle.vehicleRenters) {
+                const findVehicleRenter = await vehicleRenterRepo.findOne({
+                  where: { id: renter.id },
+                });
+                if (!findVehicleRenter) {
+                  throw new NotFoundException('Vehicle renter not found');
+                }
+          
+                findVehicleRenter.amount = vehicleDto.amountRenter;
+                findVehicleRenter.garageNumber = vehicleDto.garageNumber;
+                findVehicleRenter.vehicle = newVehicle;
+                findVehicleRenter.owner = newVehicle.id;
+                newVehicle.rentActive = true;
+                await queryRunner.manager.save(Vehicle, newVehicle);
+
+          
+                await queryRunner.manager.save(findVehicleRenter);
+              }
+            }
+          
+            const fullOldVehicle = await vehicleRepo.findOne({
+              where: { id: oldVehicle.id },
+              relations: ['vehicleRenters'],
             });
-            vehicles.push(vehicle);
+          
+            await queryRunner.manager.remove(Vehicle, fullOldVehicle);
           }
+          
+          // 👉 RELACIONAR VEHÍCULOS AL CUSTOMER
+          customer.vehicles = vehicles;
+          await queryRunner.manager.save(customer);
+          
         }
+         else {
+          for (const vehicleRenterDto of updateCustomerDto.vehicleRenters) {
+            if (vehicleRenterDto.owner !== 'GARAGE_MITRE') {
+              const vehicleOwner = await vehicleRepo.findOne({
+                where: { id: vehicleRenterDto.owner },
+                relations: ['customer'],
+              });
   
-        // Guardar los vehículos después de haber sido creados
-        await this.vehicleRepository.save(vehicles);
-        
-        // Actualizar el cliente después de agregar los vehículos
-        customer.vehicles = vehicles; // Asociar los vehículos al cliente
+              if (!vehicleOwner) throw new NotFoundException('vehicle not found');
+
+              const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: vehicleRenterDto.garageNumber } });
+              const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: vehicleRenterDto.garageNumber } });
+  
+              if (existingGarageNumberOwner || existingGarageNumberRenter) {
+                throw new NotFoundException({
+                  code: 'GARAGE_NUMBER_ALREADY_EXIST',
+                  message: `El número de garage ${vehicleRenterDto.garageNumber} ya se encuentra en uso`,
+                });
+              }
+              
+  
+              const vehicle = vehicleRenterRepo.create({
+                customer: customer,
+                vehicle: vehicleOwner,
+                amount: vehicleOwner.amountRenter || 0,
+                garageNumber: vehicleOwner.garageNumber,
+                owner: vehicleRenterDto.owner,
+              });
+  
+              vehicleOwner.rentActive = true;
+              await queryRunner.manager.save(vehicleOwner);
+  
+              vehiclesRenter.push(vehicle);
+            } else {
+              
+              const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: vehicleRenterDto.garageNumber } });
+              const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: vehicleRenterDto.garageNumber } });
+
+              if (
+                customer.vehicleRenters[0].garageNumber !== vehicleRenterDto.garageNumber &&
+                (existingGarageNumberOwner || existingGarageNumberRenter)
+              ) {
+                throw new NotFoundException({
+                  code: 'GARAGE_NUMBER_ALREADY_EXIST',
+                  message: `El número de garage ${vehicleRenterDto.garageNumber} ya se encuentra en uso`,
+                });
+              }
+              customer.vehicleRenters = [];
+              
+              
+              const vehicle = vehicleRenterRepo.create({
+                ...vehicleRenterDto,
+                owner: 'GARAGE_MITRE',
+                customer: customer,
+              });
+              customer.vehicleRenters.push(vehicle)
+  
+              vehiclesRenter.push(vehicle);
+            }
+          }
+  
+          await queryRunner.manager.save(vehiclesRenter);
+        }
       }
   
-      // Actualizar los datos del cliente
-      const { vehicles, ...customerData } = updateCustomerDto;
-      this.customerRepository.merge(customer, customerData);
+      // Actualizar Customer
+      const { vehicles, vehicleRenters, ...customerData } = updateCustomerDto;
+      customerRepo.merge(customer, customerData);
+      const savedCustomer = await queryRunner.manager.save(customer);
   
-      const savedCustomer = await this.customerRepository.save(customer);
+      // Actualizar recibo si está pendiente
+      const totalVehicleAmount = customer.vehicles?.length
+        ? customer.vehicles.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0)
+        : customer.vehicleRenters.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0);
   
-      // Calcular el monto total de los vehículos
-      const totalVehicleAmount = customer.vehicles.reduce(
-        (acc, vehicle) => acc + (vehicle.amount || 0),
-        0
-      );
+      const price = totalVehicleAmount;
   
-      // Actualizar el recibo del cliente
-      const receipt = await this.receiptRepository.findOne({
+      const receipt = await receiptRepo.findOne({
         where: { customer: { id: customer.id }, status: 'PENDING' },
       });
   
       if (receipt) {
-        receipt.price = totalVehicleAmount;
-        await this.receiptRepository.save(receipt);
+        receipt.price = price;
+        await queryRunner.manager.save(receipt);
       }
   
+      await queryRunner.commitTransaction();
       return savedCustomer;
     } catch (error) {
-      if (!(error instanceof NotFoundException)) {
-        this.logger.error(error.message, error.stack);
-      }
+      await queryRunner.rollbackTransaction();
+      this.logger.error(error.message, error.stack);
       throw error;
+    } finally {
+      await queryRunner.release();
     }
   }
   
-
   async remove(id: string) {
     try{
-      const customer = await this.customerRepository.findOne({where:{id:id}, withDeleted: true})
+      const customer = await this.customerRepository.findOne({where:{id:id}, withDeleted: true, relations:['vehicleRenters','vehicleRenters.vehicle','vehicleRenters.vehicle.customer']})
 
       if(!customer){
         throw new NotFoundException( `Customer ${customer.customerType} not found`)
       }
-
+      if(customer.customerType === 'RENTER' && customer.vehicleRenters[0].vehicle !== null){
+        for(const vehicle of customer.vehicleRenters){
+          vehicle.vehicle.rentActive = false;
+          await this.vehicleRepository.save(vehicle.vehicle)
+        }
+      }
+      const vehicle_renters = await this.vehicleRenterRepository.findOne({where:{id:customer.vehicleRenters[0].id}})
+      await this.vehicleRenterRepository.remove(vehicle_renters)
       await this.customerRepository.remove(customer);
 
       return {message: 'Customer removed successfully'}
@@ -568,5 +813,23 @@ async removeParkingType(parkingTypeId: string) {
     throw error;
   }
 }
+async getCustomerVehicleRenter() {
+  try {
+    const vehicles = await this.vehicleRepository.find({
+      where: {
+        rent: true,
+      },
+      relations: ['customer'],
+    });
+
+    return vehicles;
+  } catch (error) {
+    if (!(error instanceof NotFoundException)) {
+      this.logger.error(error.message, error.stack);
+    }
+    throw error;
+  }
+}
+
 }
 

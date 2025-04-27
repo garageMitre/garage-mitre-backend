@@ -31,7 +31,7 @@ export class ReceiptsService {
         private readonly dataSource: DataSource,
     ) {}
 
-    async createReceipt(customerId: string, manager: EntityManager): Promise<Receipt> {
+    async createReceipt(customerId: string, manager: EntityManager, price?: number): Promise<Receipt> {
       try {
         const customer = await manager.findOne(Customer, {
           where: { id: customerId },
@@ -41,13 +41,8 @@ export class ReceiptsService {
         if (!customer) {
           throw new NotFoundException('Customer not found');
         }
+
     
-        const totalVehicleAmount = customer.vehicles.reduce(
-          (acc, vehicle) => acc + (vehicle.amount || 0),
-          0,
-        );
-    
-        const price = totalVehicleAmount;
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
     
         const receipt = manager.create(Receipt, {

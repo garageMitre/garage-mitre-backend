@@ -13,6 +13,7 @@ import {
   } from 'typeorm';
 import { Receipt } from 'src/receipts/entities/receipt.entity';
 import { Vehicle } from './vehicle.entity';
+import { VehicleRenter } from './vehicle-renter.entity';
 
 export const CUSTOMER_TYPE = ['OWNER', 'RENTER', 'PRIVATE'] as const;
 export type CustomerType = (typeof CUSTOMER_TYPE)[number];
@@ -28,14 +29,14 @@ export type CustomerType = (typeof CUSTOMER_TYPE)[number];
     @Column('varchar', { length: 255 })
     lastName: string;  
 
-    @Column('varchar', { length: 255 })
-    email: string;
+    @Column('varchar', {nullable:true, length: 255 })
+    phone: string;
 
-    @Column('varchar', { length: 255 })
-    address: string; 
-    
+    @Column('varchar', { length: 650, nullable: true })
+    comments: string;
+
     @Column('int', {nullable:true})
-    documentNumber: number;
+    customerNumber: number;
 
     @Column('int')
     numberOfVehicles: number;
@@ -49,11 +50,14 @@ export type CustomerType = (typeof CUSTOMER_TYPE)[number];
     @Column('enum', { enum: CUSTOMER_TYPE})
     customerType: CustomerType;
 
-    @OneToMany(() => Vehicle, (vehicle) => vehicle.customer, { cascade: true, eager: true })
+    @OneToMany(() => Vehicle, (vehicle) => vehicle.customer, { cascade: true})
     vehicles: Vehicle[];
 
     @OneToMany(() => Receipt, (receipts) => receipts.customer, {cascade: true})
     receipts: Receipt[];
+
+    @OneToMany(() => VehicleRenter, (vehicleRenter) => vehicleRenter.customer,{ cascade: true})
+    vehicleRenters: VehicleRenter[];
   
     @DeleteDateColumn()
     deletedAt: Date;

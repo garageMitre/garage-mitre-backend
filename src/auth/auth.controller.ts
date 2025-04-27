@@ -42,6 +42,7 @@ export class AuthController {
     @Query('token') token: string | undefined,
     @Query('email') email: string | undefined,
   ) {
+    console.log('Query params:', { token, email });
     if (token) {
       return this.authService.getPasswordResetTokenByToken(token);
     }
