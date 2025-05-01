@@ -17,10 +17,13 @@ export class BoxList {
   id: string;
   
   @Column('date')
-  date: Date | null;
+  date: string | null;
 
   @Column('int')
   totalPrice: number;
+
+  @Column('int', {nullable:true})
+  boxNumber: number;
 
   @OneToMany(() => TicketRegistration, (ticketRegistration) => ticketRegistration.boxList, { cascade: true })
   ticketRegistrations: TicketRegistration[];

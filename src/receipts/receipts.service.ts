@@ -7,7 +7,6 @@ import { addMonths, startOfMonth } from 'date-fns';
 import { Customer, CustomerType } from 'src/customers/entities/customer.entity';
 import { Receipt } from './entities/receipt.entity';
 import { UpdateReceiptDto } from './dto/update-receipt.dto';
-import { IsNull } from 'typeorm';
 
 import * as dayjs from 'dayjs';
 import * as utc from 'dayjs/plugin/utc';
@@ -31,32 +30,72 @@ export class ReceiptsService {
         private readonly dataSource: DataSource,
     ) {}
 
-    async createReceipt(customerId: string, manager: EntityManager): Promise<Receipt> {
+    async createReceipt(customerId: string, manager: EntityManager, price?: number): Promise<Receipt> {
       try {
         const customer = await manager.findOne(Customer, {
           where: { id: customerId },
-          relations: ['vehicles'],
+          relations: ['vehicles', 'vehicleRenters'],
         });
     
         if (!customer) {
           throw new NotFoundException('Customer not found');
         }
     
-        const totalVehicleAmount = customer.vehicles.reduce(
-          (acc, vehicle) => acc + (vehicle.amount || 0),
-          0,
-        );
-    
-        const price = totalVehicleAmount;
+        const length = Math.random() < 0.5 ? 11 : 15;
+        const barcode = Array.from({ length }, () => Math.floor(Math.random() * 10)).join('');
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
     
+        // DEFINICIÓN DE TIPO DE RECIBO
+        let receiptTypeKey = 'OWNER';
+    
+        const manualRenters = [
+          'JOSE_RICARDO_AZNAR',
+          'CARLOS_ALBERTO_AZNAR',
+          'NIDIA_ROSA_MARIA_FONTELA',
+          'ADOLFO_RAUL_FONTELA',
+        ];
+    
+        if (customer.customerType === 'RENTER') {
+          const matchedOwner = customer.vehicleRenters.find(renter =>
+            manualRenters.includes(renter.owner)
+          );
+          if (matchedOwner) {
+            receiptTypeKey = matchedOwner.owner;
+          } else {
+            // Renter sin owner manual: opcionalmente podrías lanzar error o usar un default
+            receiptTypeKey = 'UNKNOWN_RENTER';
+          }
+        }
+    
+        // CONSULTA AL ÚLTIMO NÚMERO DE RECIBO PARA ESTE TIPO
+        const lastReceipt = await manager
+          .createQueryBuilder(Receipt, 'receipt')
+          .where('receipt.receiptTypeKey = :type', { type: receiptTypeKey })
+          .andWhere('receipt.receiptNumber IS NOT NULL')
+          .orderBy('receipt.updateAt', 'DESC')
+          .getOne();
+    
+        // CREAR NUEVO RECIBO
         const receipt = manager.create(Receipt, {
           customer,
           price,
           startAmount: price,
           dateNow: argentinaTime.format('YYYY-MM-DD'),
           startDate: customer.startDate,
+          barcode: barcode,
+          receiptTypeKey // este campo debe estar en la entidad `Receipt`
         });
+    
+        if (lastReceipt && lastReceipt.receiptNumber) {
+          const [shortNumber, longNumber] = lastReceipt.receiptNumber.split('-').map(num => num.replace('N° ', '').trim());
+    
+          const incrementedShortNumber = parseInt(shortNumber).toString().padStart(4, '0');
+          const incrementedLongNumber = (parseInt(longNumber) + 1).toString().padStart(8, '0');
+    
+          receipt.receiptNumber = `N° ${incrementedShortNumber}-${incrementedLongNumber}`;
+        } else {
+          receipt.receiptNumber = 'N° 0000-00000001';
+        }
     
         return await manager.save(receipt);
       } catch (error) {
@@ -68,7 +107,7 @@ export class ReceiptsService {
     }
     
 
-    async updateReceipt(customerId: string, updateReceiptDto: UpdateReceiptDto) {
+    async updateReceipt(customerId: string, updateReceiptDto?: UpdateReceiptDto) {
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
       await queryRunner.startTransaction();
@@ -105,38 +144,20 @@ export class ReceiptsService {
         await queryRunner.manager.save(Customer, customer);
     
         if (updateReceiptDto.print) {
-          const orderReceiptNumbers = await queryRunner.manager.find(Receipt, {
-            where: { receiptNumber: Not(IsNull()) },
-            order: { updateAt: 'DESC' },
-            take: 1,
-          });
-    
-          if (orderReceiptNumbers.length > 0 && orderReceiptNumbers[0].receiptNumber) {
-            const lastReceiptNumber = orderReceiptNumbers[0].receiptNumber;
-            const [shortNumber, longNumber] = lastReceiptNumber.split('-').map(num => num.replace('N° ', '').trim());
-    
-            const incrementedShortNumber = parseInt(shortNumber).toString().padStart(4, '0');
-            const incrementedLongNumber = (parseInt(longNumber) + 1).toString().padStart(8, '0');
-    
-            receipt.receiptNumber = `N° ${incrementedShortNumber}-${incrementedLongNumber}`;
-          } else {
-            receipt.receiptNumber = 'N° 0000-00000001';
-          }
+
         }
     
         receipt.status = 'PAID';
         receipt.paymentType = updateReceiptDto.paymentType;
         receipt.paymentDate = argentinaTime.format('YYYY-MM-DD');
-        receipt.dateNow = argentinaTime.format('YYYY-MM-DD');
     
-        const now = new Date();
-        const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    
-        let boxList = await this.boxListsService.findBoxByDate(formattedDay, queryRunner.manager);
+        const now = argentinaTime.format('YYYY-MM-DD')
+
+        let boxList = await this.boxListsService.findBoxByDate(now, queryRunner.manager);
     
         if (!boxList) {
           boxList = await this.boxListsService.createBox({
-            date: formattedDay,
+            date: now,
             totalPrice: receipt.paymentType === 'CASH' ? receipt.price : -receipt.price,
           }, queryRunner.manager);
         } else {
@@ -148,9 +169,9 @@ export class ReceiptsService {
     
         receipt.boxList = { id: boxList.id } as BoxList;
         await queryRunner.manager.save(Receipt, receipt);
-    
+        const price = receipt.price;
         // Crear el nuevo recibo dentro de la misma transacción
-        await this.createReceipt(customer.id, queryRunner.manager);
+        await this.createReceipt(customer.id, queryRunner.manager, price);
     
         await queryRunner.commitTransaction();
         return receipt;
@@ -217,11 +238,9 @@ export class ReceiptsService {
           throw new NotFoundException('No pending receipt found for this owner');
         }
     
-        const now = new Date();
-        const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const boxListDate = formattedDay;
+        const receiptDate = lastPaidReceipt.dateNow
     
-        let boxList = await this.boxListsService.findBoxByDate(boxListDate, queryRunner.manager);
+        let boxList = await this.boxListsService.findBoxByDate(receiptDate, queryRunner.manager);
     
         if (!boxList) {
           throw new NotFoundException('Box list not found');
@@ -237,13 +256,13 @@ export class ReceiptsService {
           totalPrice: boxList.totalPrice,
         }, queryRunner.manager);
     
-        await receiptRepo.remove(pendingReceipt);
-    
         lastPaidReceipt.status = 'PENDING';
         lastPaidReceipt.paymentDate = null;
         lastPaidReceipt.boxList = null;
-        lastPaidReceipt.receiptNumber = null;
         lastPaidReceipt.paymentType = null;
+        lastPaidReceipt.price = pendingReceipt.price;
+        await receiptRepo.remove(pendingReceipt);
+    
     
         await receiptRepo.save(lastPaidReceipt);
     
@@ -293,59 +312,21 @@ export class ReceiptsService {
         throw error;
       }
     }
-    
-    async numberGeneratorForAllCustomer(customerId: string){
-        try{
-            const customer = await this.customerRepository.findOne({ 
-                where: { id: customerId },
-                relations: ['receipts']
-            });
-            if (!customer) {
-                throw new NotFoundException('Customer not found');
-            }
 
-            const receipt = await this.receiptRepository.findOne({
-                where: { customer:{id:customer.id}, status:'PENDING'},
-            });
-    
-            if (!receipt) {
-                throw new NotFoundException('Receipt not found');
-            }
-            const orderReceiptNumbers = await this.receiptRepository.find({
-                where: { receiptNumber: Not(IsNull()), },
-                order: { updateAt: 'DESC' }, // Ordenar por la fecha de creación, de más reciente a más antiguo
-                take: 1, // Limitar a un solo recibo
-            });
-            
-            // Si existe un recibo pendiente
-            if (orderReceiptNumbers.length > 0 && orderReceiptNumbers[0].receiptNumber) {
-                const lastReceiptNumber = orderReceiptNumbers[0].receiptNumber;
-            
-                // Separar el número corto y largo
-                const [shortNumber, longNumber] = lastReceiptNumber.split('-').map(num => num.replace('N° ', '').trim());
-            
-                // Incrementar el número corto (de 4 dígitos) y el número largo (de 8 dígitos)
-                const incrementedShortNumber = (parseInt(shortNumber)).toString().padStart(4, '0');
-                const incrementedLongNumber = (parseInt(longNumber) + 1).toString().padStart(8, '0');
-            
-                // Crear el nuevo número de recibo con el formato adecuado
-                const receiptNumber = `N° ${incrementedShortNumber}-${incrementedLongNumber}`;
-            
-                // Asignar el número de recibo al nuevo recibo
-                receipt.receiptNumber = receiptNumber;
-            } else {
-                // Si no hay recibos previos, comenzar desde 0000-00000000
-                const receiptNumber = `N° 0000-00000001`;
-                receipt.receiptNumber = receiptNumber;
-            }
-            await this.receiptRepository.save(receipt);
-            return receipt;
-
-        }catch (error) {
-            if (!(error instanceof NotFoundException)) {
-                this.logger.error(error.message, error.stack);
-            }
-            throw error;
+    async getBarcodeReceipt(barcode: string){
+      try{
+        const barcodeReceipt = await this.receiptRepository.findOne({where:{barcode:barcode}, relations:['customer']})
+        if(!barcodeReceipt){
+          this.logger.warn(`No se encontró el recibocon el código de barras: ${barcode}`);
+          return null;
         }
+        return barcodeReceipt;
+      }catch (error) {
+        if (!(error instanceof NotFoundException)) {
+          this.logger.error(error.message, error.stack);
+        }
+        throw error;
+      }
     }
+
 }

@@ -7,6 +7,16 @@ import { BoxList } from './entities/box-list.entity';
 import { CreateOtherPaymentDto } from './dto/create-other-payment.dto';
 import { OtherPayment } from './entities/other-payment.entity';
 
+import * as dayjs from 'dayjs';
+import * as utc from 'dayjs/plugin/utc';
+import * as timezone from 'dayjs/plugin/timezone';
+import * as isBetween from 'dayjs/plugin/isBetween'; 
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+dayjs.extend(isBetween);
+
+
 @Injectable()
 export class BoxListsService {
 
@@ -23,8 +33,25 @@ export class BoxListsService {
       try {
         const repo = manager ? manager.getRepository(BoxList) : this.boxListRepository;
     
-        const box = repo.create(createBoxListDto);
-        const savedBox = await repo.save(box); 
+        // 🟢 Buscar el último box creado ordenado por id descendente
+        const lastBox = await repo.findOne({
+          order: { id: 'DESC' },
+          where: {}, // 👈 Agregás un where vacío
+        });
+    
+        // 🟢 Setear el boxNumber
+        let newBoxNumber = 1; // Default
+        if (lastBox && lastBox?.boxNumber) {
+          newBoxNumber = lastBox.boxNumber + 1;
+        }
+    
+        // 🟢 Crear y asignar el nuevo boxNumber
+        const box = repo.create({
+          ...createBoxListDto,
+          boxNumber: newBoxNumber,
+        });
+    
+        const savedBox = await repo.save(box);
     
         return savedBox;
       } catch (error) {
@@ -32,6 +59,7 @@ export class BoxListsService {
         throw error;
       }
     }
+    
   async getAllboxes(){
     try{
 
@@ -62,26 +90,27 @@ export class BoxListsService {
     }
   }
 
-  async findBoxByDate(date: Date, manager?: EntityManager): Promise<BoxList | null> {
+  async findBoxByDate(date: string, manager?: EntityManager): Promise<BoxList | null> {
     try {
       const repo = manager ? manager.getRepository(BoxList) : this.boxListRepository;
-  
-      const startOfDay = new Date(date.setHours(0, 0, 0, 0));
-      const endOfDay = new Date(date.setHours(23, 59, 59, 999));
-  
+
+      
       const boxList = await repo.findOne({
-        where: { date: Between(startOfDay, endOfDay) },
+        where: { date: date},
         relations: [
           'ticketRegistrations',
           'receipts',
           'receipts.customer',
           'otherPayments',
-          'ticketRegistrationForDays'
+          'ticketRegistrationForDays',
+          'receipts.customer.vehicleRenters',
+          'receipts.customer.vehicles',
+          'receipts.customer.vehicleRenters.vehicle.customer'
         ],
       });
-  
+      
       if (!boxList) {
-        console.warn(`No se encontró un BoxList para la fecha: ${startOfDay.toISOString()}`);
+        console.warn(`No se encontró un BoxList para la fecha: ${date}`);
         return null;
       }
   
@@ -97,7 +126,7 @@ export class BoxListsService {
     try{
       const boxListWithRegistrations = await this.boxListRepository.findOne({
         where: { id: boxListId },
-        relations: ['ticketRegistrations', 'receipts', 'ticketRegistrationForDays','otherPayments'],
+        relations: ['ticketRegistrations', 'receipts', 'ticketRegistrationForDays','otherPayments', 'receipts.customer.vehicleRenters', 'receipts.customer.vehicles'],
       });
       if(!boxListWithRegistrations){
         throw new NotFoundException('Box list not found')
@@ -134,11 +163,12 @@ export class BoxListsService {
     try{
       const otherPayment = this.otherPaymentepository.create(createOtherPaymentDto);
 
-      const now = new Date();
+      const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
+      const now = argentinaTime.format('YYYY-MM-DD')
       
-      const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      otherPayment.dateNow = formattedDay;
-      const boxListDate = formattedDay;
+
+      otherPayment.dateNow = now;
+      const boxListDate = now;
       let boxList = await this.findBoxByDate(boxListDate);
       
       if (!boxList) {
