@@ -2,9 +2,9 @@ import { IsArray, IsDate, IsNumber, IsOptional, IsString, Matches } from "class-
 
 export class CreateBoxListDto {
 
-    @IsDate()
+    @IsString()
     @IsOptional()
-    date: Date;
+    date: string;
 
     @IsNumber()
     totalPrice: number

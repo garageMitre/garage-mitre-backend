@@ -20,11 +20,14 @@ export class TicketRegistrationForDay {
   @Column('int')
   price: number;
 
-  @Column('int')
-  hours: number;
+  @Column('int', {nullable:true})
+  days: number;
+
+  @Column('int', {nullable:true})
+  weeks: number;
   
   @Column('date', { nullable: true })
-  dateNow: Date | null;
+  dateNow: string | null;
 
   @ManyToOne(() => BoxList, (boxList) => boxList.ticketRegistrationForDays, {onDelete: 'CASCADE'})
   boxList: BoxList;

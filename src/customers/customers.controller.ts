@@ -18,8 +18,8 @@ export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 
   @Post()
-  create(@Body() createCustomerDto: CreateCustomerDto) {
-    return this.customersService.create(createCustomerDto);
+  create(@Body() createCustomerDto?: CreateCustomerDto) {
+    return this.customersService.updateRenters(createCustomerDto);
   }
 
   @Get('customer/:customerType')

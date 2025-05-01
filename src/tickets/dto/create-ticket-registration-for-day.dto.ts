@@ -8,5 +8,9 @@ export class CreateTicketRegistrationForDayDto {
 
     @IsNumber()
     @IsNotEmpty()
-    hours: number
+    days: number
+
+    @IsNumber()
+    @IsNotEmpty()
+    weeks: number
 }

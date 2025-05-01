@@ -7,6 +7,10 @@ export class CreateVehicleDto {
 
   @IsString()
   @IsOptional()
+  licensePlate: string;
+
+  @IsString()
+  @IsOptional()
   garageNumber: string;
 
   @IsBoolean()
@@ -28,6 +32,9 @@ export class CreateVehicleDto {
 
 export class CreateVehicleRenterDto {
         
+  @IsString()
+  @IsOptional()
+  licensePlate: string;
 
   @IsString()
   @IsOptional()

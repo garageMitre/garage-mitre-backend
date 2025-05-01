@@ -35,23 +35,23 @@ export class Receipt {
   @Column('date', { nullable: true })
   startDate: string | null;
 
-  @Column('int')
+  @Column('int', { nullable: true })
   price: number;
 
   @Column('varchar', { nullable: true })
   receiptNumber: string;  
 
-  @Column('int')
+  @Column('int', { nullable: true })
   startAmount: number;
-
-  @Column('date', { nullable: true })
-  lastInterestApplied: Date | null; 
-
-  @Column('int', {nullable: true})
-  interestPercentage: number;
   
   @Column('date', { nullable: true })
   dateNow: string | null;
+
+  @Column('varchar', { nullable: true })
+  barcode: string;  
+
+  @Column('varchar', { nullable: true })
+  receiptTypeKey: string;
 
   @ManyToOne(() => Customer, (customer) => customer.receipts, { onDelete: 'CASCADE' })
   @JoinColumn()

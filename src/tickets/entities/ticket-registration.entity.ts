@@ -33,7 +33,7 @@ export class TicketRegistration {
   departureTime: string | null;
 
   @Column('date', { nullable: true })
-  dateNow: Date | null;
+  dateNow: string | null;
 
   @OneToOne(() => Ticket, (ticket) => ticket.ticketRegistration)
   @JoinColumn()

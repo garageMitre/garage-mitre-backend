@@ -18,6 +18,9 @@ import { VehicleRenter } from './vehicle-renter.entity';
     
     @Column('varchar',{nullable:true})
     garageNumber: string;
+
+    @Column('varchar', { length: 255, nullable:true })
+    licensePlate: string;
   
     @Column('bool', { nullable:true, default:false })
     rent: boolean;

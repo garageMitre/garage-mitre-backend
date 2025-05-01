@@ -129,8 +129,6 @@ export class TicketsService {
             relations: ['ticket'],
         });
 
-        const now = new Date();
-        const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
         if (!existingRegistration) {
             const argentinaTime = (dayjs().tz('America/Argentina/Buenos_Aires') as dayjs.Dayjs);
@@ -154,7 +152,9 @@ export class TicketsService {
             this.ticketGateway.emitNewRegistration(savedTicket);
             return savedTicket;
         } else {
-            return await this.updateRegistration(existingRegistration, now, formattedDay, ticket);
+          const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
+          const now = argentinaTime.format('YYYY-MM-DD')
+            return await this.updateRegistration(existingRegistration, now, ticket);
         }
     } catch (error) {
         this.logger.error(error.message, error.stack);
@@ -164,16 +164,18 @@ export class TicketsService {
 async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRegistrationForDayDto) {
   try {
     const ticket = this.ticketRegistrationForDayRepository.create(createTicketRegistrationForDayDto);
-    ticket.description = `Tipo: Dia/s, Tiempo: ${ticket.hours} Horas`
-    const now = new Date();
-    const formattedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    ticket.dateNow = formattedDay;
-    const boxListDate = formattedDay;
-    let boxList = await this.boxListsService.findBoxByDate(boxListDate);
+    const time = createTicketRegistrationForDayDto.days ? `${createTicketRegistrationForDayDto.days} dia/s` : `${createTicketRegistrationForDayDto.weeks} semana/s`;
+    ticket.description = `Tipo: ${createTicketRegistrationForDayDto.days ? 'Día/s' : 'Semana/s'}, Tiempo: ${time}`;
+    const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
+    const now = argentinaTime.format('YYYY-MM-DD')
+
+    ticket.dateNow = now;
+
+    let boxList = await this.boxListsService.findBoxByDate(now);
 
     if (!boxList) {
         boxList = await this.boxListsService.createBox({
-            date: boxListDate,
+            date: now,
             totalPrice: ticket.price
         });
     } else {
@@ -193,7 +195,7 @@ async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRe
 }
 
 
-async updateRegistration(existingRegistration: TicketRegistration, now: Date, formattedDay: Date, ticket: Ticket) {
+async updateRegistration(existingRegistration: TicketRegistration, formattedDay: string, ticket: Ticket) {
     try {
 
       const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');

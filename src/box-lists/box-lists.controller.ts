@@ -32,18 +32,20 @@ export class BoxListsController {
 
   @Get('date/:date')
   async findBoxByDate(@Param('date') date: string) {
-    const formattedDate = new Date(date);
-    if (isNaN(formattedDate.getTime())) {
-      throw new NotFoundException('Invalid date format');
+    // Validar el formato YYYY-MM-DD con una expresión regular
+    const isValidFormat = /^\d{4}-\d{2}-\d{2}$/.test(date);
+    if (!isValidFormat) {
+      throw new NotFoundException('Invalid date format, expected YYYY-MM-DD');
     }
-
-    const boxList = await this.boxListsService.findBoxByDate(formattedDate);
+  
+    const boxList = await this.boxListsService.findBoxByDate(date);
     if (!boxList) {
       throw new NotFoundException('BoxList not found for the given date');
     }
-
+  
     return { message: 'BoxList found', data: boxList };
   }
+  
 
   @Post('otherPayment')
   async createOtherPayment(@Body() createOtherPaymentDto: CreateOtherPaymentDto) {

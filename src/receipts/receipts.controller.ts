@@ -26,9 +26,4 @@ export class ReceiptsController {
     async findAllPendingReceipts( @Param('customerType') customer: CustomerType) {
         return await this.receiptsService.findAllPendingReceipts(customer);
     }
-
-    @Patch('numberGenerator/:customerId')
-    async numberGeneratorForAllCustomer( @Param('customerId') customerId: string) {
-        return await this.receiptsService.numberGeneratorForAllCustomer(customerId);
-    }
 }
