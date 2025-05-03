@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { CreateCustomerDto, CreateVehicleDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, QueryFailedError, Repository } from 'typeorm';
+import { DataSource, ILike, QueryFailedError, Repository } from 'typeorm';
 import { Customer, CustomerType } from './entities/customer.entity';
 import { ReceiptsService } from 'src/receipts/receipts.service';
 import { addMonths, startOfMonth } from 'date-fns';
@@ -134,7 +134,7 @@ export class CustomersService {
           'JOSE_RICARDO_AZNAR',
           'CARLOS_ALBERTO_AZNAR',
           'NIDIA_ROSA_MARIA_FONTELA',
-          'ADOLFO_RAUL_FONTELA',
+          'ALDO_RAUL_FONTELA',
         ];
         
     
@@ -163,10 +163,13 @@ export class CustomersService {
                 });
               }
     
-              const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: vehicleDto.garageNumber } });
-              const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: vehicleDto.garageNumber } });
+              const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: ILike(vehicleDto.garageNumber) } });
+              const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: ILike(vehicleDto.garageNumber)  } });
     
-              if (existingGarageNumberOwner || existingGarageNumberRenter) {
+              if (
+                vehicleDto.garageNumber !== "" &&
+                (existingGarageNumberOwner || existingGarageNumberRenter)
+              ) {
                 throw new NotFoundException({
                   code: 'GARAGE_NUMBER_ALREADY_EXIST',
                   message: `El número de garage ${vehicleDto.garageNumber} ya se encuentra en uso`,
@@ -197,15 +200,19 @@ export class CustomersService {
                     throw new NotFoundException('Vehicle not found');
                   }
       
-                  const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: vehicleRenterDto.garageNumber } });
-                  const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: vehicleRenterDto.garageNumber } });
+                  const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: ILike(vehicleRenterDto.garageNumber)  } });
+                  const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: ILike(vehicleRenterDto.garageNumber)  } });
       
-                  if (existingGarageNumberOwner || existingGarageNumberRenter) {
+                  if (
+                    vehicleRenterDto.garageNumber !== "" &&
+                    (existingGarageNumberOwner || existingGarageNumberRenter)
+                  ) {
                     throw new NotFoundException({
                       code: 'GARAGE_NUMBER_ALREADY_EXIST',
                       message: `El número de garage ${vehicleRenterDto.garageNumber} ya se encuentra en uso`,
                     });
                   }
+                  
       
                   const vehicle = vehicleRenterRepo.create({
                     customer: savedCustomer,
@@ -220,10 +227,10 @@ export class CustomersService {
       
                   vehiclesRenter.push(vehicle);
                 } else {
-                  const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: vehicleRenterDto.garageNumber } });
-                  const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: vehicleRenterDto.garageNumber } });
+                  const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: ILike(vehicleRenterDto.garageNumber)  } });
+                  const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: ILike(vehicleRenterDto.garageNumber)  } });
       
-                  if (existingGarageNumberOwner || existingGarageNumberRenter) {
+                  if (existingGarageNumberOwner || existingGarageNumberRenter && vehicleRenterDto.garageNumber !== "") {
                     throw new NotFoundException({
                       code: 'GARAGE_NUMBER_ALREADY_EXIST',
                       message: `El número de garage ${vehicleRenterDto.garageNumber} ya se encuentra en uso`,
@@ -340,7 +347,7 @@ export class CustomersService {
         'JOSE_RICARDO_AZNAR',
         'CARLOS_ALBERTO_AZNAR',
         'NIDIA_ROSA_MARIA_FONTELA',
-        'ADOLFO_RAUL_FONTELA',
+        'ALDO_RAUL_FONTELA',
       ];
       
       // Desactivar rentActive de vehículos rentados
@@ -398,10 +405,13 @@ export class CustomersService {
               });
             }
 
-            const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: vehicleDto.garageNumber } });
-            const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: vehicleDto.garageNumber } });
+            const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: ILike(vehicleDto.garageNumber) } });
+            const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: ILike(vehicleDto.garageNumber)  } });
 
-            if (existingGarageNumberOwner || existingGarageNumberRenter) {
+            if (
+              vehicleDto.garageNumber !== "" &&
+              (existingGarageNumberOwner || existingGarageNumberRenter)
+            ) {
               throw new NotFoundException({
                 code: 'GARAGE_NUMBER_ALREADY_EXIST',
                 message: `El número de garage ${vehicleDto.garageNumber} ya se encuentra en uso`,
@@ -441,11 +451,11 @@ export class CustomersService {
                 message: 'Parking type not found',
               });
             }
-            const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: vehicleDto.garageNumber } });
-            const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: vehicleDto.garageNumber } });
+            const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: ILike(vehicleDto.garageNumber) } });
+            const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: ILike(vehicleDto.garageNumber)  } });
 
             if (
-              oldVehicle.garageNumber !== vehicleDto.garageNumber &&
+              oldVehicle.garageNumber !== vehicleDto.garageNumber && vehicleDto.garageNumber !== "" &&
               (existingGarageNumberOwner || existingGarageNumberRenter)
             ) {
               throw new NotFoundException({
@@ -543,10 +553,14 @@ export class CustomersService {
                 vehiclesRenter.push(vehicle);
               } else {
                 
-                const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: vehicleRenterDto.garageNumber } });
-                const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: vehicleRenterDto.garageNumber } });
+                const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: ILike(vehicleRenterDto.garageNumber)  } });
+                const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: ILike(vehicleRenterDto.garageNumber)  } });
   
-                if (existingGarageNumberOwner || existingGarageNumberRenter){
+                
+            if (
+              vehicleRenterDto.garageNumber !== "" &&
+              (existingGarageNumberOwner || existingGarageNumberRenter)
+            ){
                   throw new NotFoundException({
                     code: 'GARAGE_NUMBER_ALREADY_EXIST',
                     message: `El número de garage ${vehicleRenterDto.garageNumber} ya se encuentra en uso`,

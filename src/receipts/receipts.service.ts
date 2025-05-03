@@ -63,7 +63,7 @@ export class ReceiptsService {
             receiptTypeKey = matchedOwner.owner;
           } else {
             // Renter sin owner manual: opcionalmente podrías lanzar error o usar un default
-            receiptTypeKey = 'UNKNOWN_RENTER';
+            receiptTypeKey = 'GARAGE_MITRE';
           }
         }
     
