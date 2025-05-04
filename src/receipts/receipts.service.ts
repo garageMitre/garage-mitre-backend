@@ -52,7 +52,7 @@ export class ReceiptsService {
           'JOSE_RICARDO_AZNAR',
           'CARLOS_ALBERTO_AZNAR',
           'NIDIA_ROSA_MARIA_FONTELA',
-          'ADOLFO_RAUL_FONTELA',
+          'ALDO_RAUL_FONTELA',
         ];
     
         if (customer.customerType === 'RENTER') {
@@ -159,7 +159,7 @@ export class ReceiptsService {
           boxList = await this.boxListsService.createBox({
             date: now,
             totalPrice: receipt.paymentType === 'CASH' ? receipt.price : -receipt.price,
-          }, queryRunner.manager);
+          });
         } else {
           boxList.totalPrice += receipt.paymentType === 'CASH' ? receipt.price : -receipt.price;
           await this.boxListsService.updateBox(boxList.id, {
@@ -238,7 +238,7 @@ export class ReceiptsService {
           throw new NotFoundException('No pending receipt found for this owner');
         }
     
-        const receiptDate = lastPaidReceipt.dateNow
+        const receiptDate = lastPaidReceipt.paymentDate
     
         let boxList = await this.boxListsService.findBoxByDate(receiptDate, queryRunner.manager);
     
@@ -246,7 +246,7 @@ export class ReceiptsService {
           throw new NotFoundException('Box list not found');
         }
     
-        if (lastPaidReceipt.paymentType === 'TRANSFER') {
+        if (lastPaidReceipt.paymentType === 'TRANSFER' || lastPaidReceipt.paymentType === 'CHECK') {
           boxList.totalPrice += lastPaidReceipt.price;
         } else {
           boxList.totalPrice -= lastPaidReceipt.price;
