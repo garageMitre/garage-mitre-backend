@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { CreateBoxListDto } from './dto/create-box-list.dto';
 import { UpdateBoxListDto } from './dto/update-box-list.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, EntityManager, Repository } from 'typeorm';
+import { Between, DataSource, EntityManager, Repository } from 'typeorm';
 import { BoxList } from './entities/box-list.entity';
 import { CreateOtherPaymentDto } from './dto/create-other-payment.dto';
 import { OtherPayment } from './entities/other-payment.entity';
@@ -27,38 +27,50 @@ export class BoxListsService {
       private readonly boxListRepository: Repository<BoxList>,
       @InjectRepository(OtherPayment)
       private readonly otherPaymentepository: Repository<OtherPayment>,
+      private readonly dataSource: DataSource,
+      
     ) {}
 
-    async createBox(createBoxListDto: CreateBoxListDto, manager?: EntityManager) {
+    async createBox(createBoxListDto: CreateBoxListDto) {
+      const queryRunner = this.dataSource.createQueryRunner();
+    
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+    
       try {
-        const repo = manager ? manager.getRepository(BoxList) : this.boxListRepository;
+        const repo = queryRunner.manager.getRepository(BoxList);
     
-        // 🟢 Buscar el último box creado ordenado por id descendente
-        const lastBox = await repo.findOne({
-          order: { id: 'DESC' },
-          where: {}, // 👈 Agregás un where vacío
-        });
+        // Bloquea el último box para evitar condiciones de carrera
+        const lastBox = await repo
+          .createQueryBuilder("box")
+          .setLock("pessimistic_write") // <- importante
+          .orderBy("box.id", "ASC")
+          .getOne();
+
     
-        // 🟢 Setear el boxNumber
-        let newBoxNumber = 1; // Default
-        if (lastBox && lastBox?.boxNumber) {
+        let newBoxNumber = 1;
+        if (lastBox?.boxNumber) {
           newBoxNumber = lastBox.boxNumber + 1;
         }
     
-        // 🟢 Crear y asignar el nuevo boxNumber
         const box = repo.create({
           ...createBoxListDto,
           boxNumber: newBoxNumber,
         });
     
         const savedBox = await repo.save(box);
+        await queryRunner.commitTransaction();
     
         return savedBox;
       } catch (error) {
+        await queryRunner.rollbackTransaction();
         this.logger.error(error.message, error.stack);
         throw error;
+      } finally {
+        await queryRunner.release();
       }
     }
+    
     
   async getAllboxes(){
     try{

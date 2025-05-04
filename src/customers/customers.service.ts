@@ -855,7 +855,7 @@ async updateAmount(updateAmountAllCustomerDto: UpdateAmountAllCustomerDto) {
       'JOSE_RICARDO_AZNAR',
       'CARLOS_ALBERTO_AZNAR',
       'NIDIA_ROSA_MARIA_FONTELA',
-      'ADOLFO_RAUL_FONTELA',
+      'ALDO_RAUL_FONTELA',
     ];
 
     const customers = await this.customerRepository.find({

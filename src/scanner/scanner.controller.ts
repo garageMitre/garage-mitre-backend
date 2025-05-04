@@ -11,9 +11,4 @@ export class ScannerController {
   async startScanner(@Body() scannerDto: ScannerDto) {
     return await this.scannerService.start(scannerDto);
   }
-
-  @Post('receiptScanner')
-  async receiptScanner(@Body() updateReceiptDto : UpdateReceiptDto) {
-    return await this.scannerService.receiptScanner(updateReceiptDto);
-  }
 }

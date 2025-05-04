@@ -9,9 +9,6 @@ import {
 import { Customer } from './customer.entity';
 import { Vehicle } from './vehicle.entity';
 
-export const OWNER_TYPE = ['TERCEROS', 'JOSE_RICARDO_AZNAR', 'CARLOS_ALBERTO_AZNAR','NIDIA_ROSA_MARIA_FONTELA','ADOLFO_RAUL_FONTELA'] as const;
-export type OwnerType = (typeof OWNER_TYPE)[number];
-
   @Entity({ name: 'vehicle_renters' })
   export class VehicleRenter {
     @PrimaryGeneratedColumn('uuid')
