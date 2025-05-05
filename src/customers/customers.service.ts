@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { CreateCustomerDto, CreateVehicleDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, ILike, QueryFailedError, Repository } from 'typeorm';
+import { DataSource, ILike, QueryFailedError, Raw, Repository } from 'typeorm';
 import { Customer, CustomerType } from './entities/customer.entity';
 import { ReceiptsService } from 'src/receipts/receipts.service';
 import { addMonths, startOfMonth } from 'date-fns';
@@ -162,9 +162,19 @@ export class CustomersService {
                   message: 'Parking type not found',
                 });
               }
-    
-              const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: ILike(vehicleDto.garageNumber) } });
-              const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: ILike(vehicleDto.garageNumber)  } });
+              const normalizedGarageNumber = vehicleDto.garageNumber.replace(/\s/g, '').toLowerCase();
+
+              const existingGarageNumberOwner = await vehicleRepo.findOne({
+                where: {
+                  garageNumber: Raw((alias) => `LOWER(REPLACE(${alias}, ' ', '')) = '${normalizedGarageNumber}'`),
+                },
+              });
+              
+              const existingGarageNumberRenter = await vehicleRenterRepo.findOne({
+                where: {
+                  garageNumber: Raw((alias) => `LOWER(REPLACE(${alias}, ' ', '')) = '${normalizedGarageNumber}'`),
+                },
+              });
     
               if (
                 vehicleDto.garageNumber !== "" &&
@@ -200,8 +210,19 @@ export class CustomersService {
                     throw new NotFoundException('Vehicle not found');
                   }
       
-                  const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: ILike(vehicleRenterDto.garageNumber)  } });
-                  const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: ILike(vehicleRenterDto.garageNumber)  } });
+                  const normalizedGarageNumber = vehicleRenterDto.garageNumber.replace(/\s/g, '').toLowerCase();
+
+                  const existingGarageNumberOwner = await vehicleRepo.findOne({
+                    where: {
+                      garageNumber: Raw((alias) => `LOWER(REPLACE(${alias}, ' ', '')) = '${normalizedGarageNumber}'`),
+                    },
+                  });
+                  
+                  const existingGarageNumberRenter = await vehicleRenterRepo.findOne({
+                    where: {
+                      garageNumber: Raw((alias) => `LOWER(REPLACE(${alias}, ' ', '')) = '${normalizedGarageNumber}'`),
+                    },
+                  });
       
                   if (
                     vehicleRenterDto.garageNumber !== "" &&
@@ -227,8 +248,19 @@ export class CustomersService {
       
                   vehiclesRenter.push(vehicle);
                 } else {
-                  const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: ILike(vehicleRenterDto.garageNumber)  } });
-                  const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: ILike(vehicleRenterDto.garageNumber)  } });
+                  const normalizedGarageNumber = vehicleRenterDto.garageNumber.replace(/\s/g, '').toLowerCase();
+
+                  const existingGarageNumberOwner = await vehicleRepo.findOne({
+                    where: {
+                      garageNumber: Raw((alias) => `LOWER(REPLACE(${alias}, ' ', '')) = '${normalizedGarageNumber}'`),
+                    },
+                  });
+                  
+                  const existingGarageNumberRenter = await vehicleRenterRepo.findOne({
+                    where: {
+                      garageNumber: Raw((alias) => `LOWER(REPLACE(${alias}, ' ', '')) = '${normalizedGarageNumber}'`),
+                    },
+                  });
       
                   if (existingGarageNumberOwner || existingGarageNumberRenter && vehicleRenterDto.garageNumber !== "") {
                     throw new NotFoundException({
@@ -404,9 +436,19 @@ export class CustomersService {
                 message: 'Parking type not found',
               });
             }
+            const normalizedGarageNumber = vehicleDto.garageNumber.replace(/\s/g, '').toLowerCase();
 
-            const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: ILike(vehicleDto.garageNumber) } });
-            const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: ILike(vehicleDto.garageNumber)  } });
+            const existingGarageNumberOwner = await vehicleRepo.findOne({
+              where: {
+                garageNumber: Raw((alias) => `LOWER(REPLACE(${alias}, ' ', '')) = '${normalizedGarageNumber}'`),
+              },
+            });
+            
+            const existingGarageNumberRenter = await vehicleRenterRepo.findOne({
+              where: {
+                garageNumber: Raw((alias) => `LOWER(REPLACE(${alias}, ' ', '')) = '${normalizedGarageNumber}'`),
+              },
+            });
 
             if (
               vehicleDto.garageNumber !== "" &&
@@ -451,8 +493,19 @@ export class CustomersService {
                 message: 'Parking type not found',
               });
             }
-            const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: ILike(vehicleDto.garageNumber) } });
-            const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: ILike(vehicleDto.garageNumber)  } });
+            const normalizedGarageNumber = vehicleDto.garageNumber.replace(/\s/g, '').toLowerCase();
+
+            const existingGarageNumberOwner = await vehicleRepo.findOne({
+              where: {
+                garageNumber: Raw((alias) => `LOWER(REPLACE(${alias}, ' ', '')) = '${normalizedGarageNumber}'`),
+              },
+            });
+            
+            const existingGarageNumberRenter = await vehicleRenterRepo.findOne({
+              where: {
+                garageNumber: Raw((alias) => `LOWER(REPLACE(${alias}, ' ', '')) = '${normalizedGarageNumber}'`),
+              },
+            });
 
             if (
               oldVehicle.garageNumber !== vehicleDto.garageNumber && vehicleDto.garageNumber !== "" &&
@@ -553,8 +606,19 @@ export class CustomersService {
                 vehiclesRenter.push(vehicle);
               } else {
                 
-                const existingGarageNumberOwner = await vehicleRepo.findOne({ where: { garageNumber: ILike(vehicleRenterDto.garageNumber)  } });
-                const existingGarageNumberRenter = await vehicleRenterRepo.findOne({ where: { garageNumber: ILike(vehicleRenterDto.garageNumber)  } });
+                const normalizedGarageNumber = vehicleRenterDto.garageNumber.replace(/\s/g, '').toLowerCase();
+
+                const existingGarageNumberOwner = await vehicleRepo.findOne({
+                  where: {
+                    garageNumber: Raw((alias) => `LOWER(REPLACE(${alias}, ' ', '')) = '${normalizedGarageNumber}'`),
+                  },
+                });
+                
+                const existingGarageNumberRenter = await vehicleRenterRepo.findOne({
+                  where: {
+                    garageNumber: Raw((alias) => `LOWER(REPLACE(${alias}, ' ', '')) = '${normalizedGarageNumber}'`),
+                  },
+                });
   
                 
             if (
@@ -851,6 +915,7 @@ export class CustomersService {
 
 async updateAmount(updateAmountAllCustomerDto: UpdateAmountAllCustomerDto) {
   try {
+
     const manualOwners = [
       'JOSE_RICARDO_AZNAR',
       'CARLOS_ALBERTO_AZNAR',
@@ -859,7 +924,7 @@ async updateAmount(updateAmountAllCustomerDto: UpdateAmountAllCustomerDto) {
     ];
 
     const customers = await this.customerRepository.find({
-      where: { customerType: updateAmountAllCustomerDto.customerType },
+      where: { customerType: 'RENTER' },
       relations: ['vehicles', 'vehicleRenters', 'vehicleRenters.vehicle'],
     });
 
@@ -870,20 +935,6 @@ async updateAmount(updateAmountAllCustomerDto: UpdateAmountAllCustomerDto) {
     }
 
     for (const customer of customers) {
-      if (customer.customerType === 'OWNER') {
-        for (const vehicle of customer.vehicles) {
-          vehicle.amount += updateAmountAllCustomerDto.amount;
-        }
-        await this.vehicleRepository.save(customer.vehicles);
-
-        // Actualizar montos de todos los tipos de parking
-        const parkingTypes = await this.parkingTypeRepository.find();
-        for (const parkingType of parkingTypes) {
-          parkingType.amount += updateAmountAllCustomerDto.amount;
-        }
-        await this.parkingTypeRepository.save(parkingTypes);
-
-      } else {
         const isManualOwner = manualOwners.includes(updateAmountAllCustomerDto.ownerTypeOfRenter);
 
         const filteredVehicleRenters = customer.vehicleRenters.filter(vehicleRenter => {
@@ -901,7 +952,6 @@ async updateAmount(updateAmountAllCustomerDto: UpdateAmountAllCustomerDto) {
         }
 
         await this.vehicleRenterRepository.save(filteredVehicleRenters);
-      }
 
       // Actualizar el recibo
       const receipt = await this.receiptRepository.findOne({
@@ -911,16 +961,12 @@ async updateAmount(updateAmountAllCustomerDto: UpdateAmountAllCustomerDto) {
       if (receipt) {
         let vehiclesCount = 0;
 
-        if (customer.customerType === 'OWNER') {
-          vehiclesCount = customer.numberOfVehicles;
-        } else {
-          const isManualOwner = manualOwners.includes(updateAmountAllCustomerDto.ownerTypeOfRenter);
-          vehiclesCount = customer.vehicleRenters.filter(vehicleRenter =>
-            isManualOwner
-              ? manualOwners.includes(vehicleRenter.owner)
-              : !manualOwners.includes(vehicleRenter.owner)
-          ).length;
-        }
+        const isManualOwner = manualOwners.includes(updateAmountAllCustomerDto.ownerTypeOfRenter);
+        vehiclesCount = customer.vehicleRenters.filter(vehicleRenter =>
+          isManualOwner
+            ? manualOwners.includes(vehicleRenter.owner)
+            : !manualOwners.includes(vehicleRenter.owner)
+        ).length;
 
         receipt.price += updateAmountAllCustomerDto.amount * vehiclesCount;
         await this.receiptRepository.save(receipt);

@@ -235,7 +235,7 @@ async updateRegistration(existingRegistration: TicketRegistration, formattedDay:
           multiplier += extraBlocks;
         }
       
-        ticket.price = basePrice * multiplier;
+        ticket.price = basePrice;
       }
       
       await this.ticketRepository.save(ticket);
