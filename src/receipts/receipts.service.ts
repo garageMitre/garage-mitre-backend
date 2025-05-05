@@ -158,10 +158,10 @@ export class ReceiptsService {
         if (!boxList) {
           boxList = await this.boxListsService.createBox({
             date: now,
-            totalPrice: receipt.paymentType === 'CASH' ? receipt.price : -receipt.price,
+            totalPrice: receipt.paymentType === 'CASH' || 'CHECK' ? receipt.price : -receipt.price,
           });
         } else {
-          boxList.totalPrice += receipt.paymentType === 'CASH' ? receipt.price : -receipt.price;
+          boxList.totalPrice += receipt.paymentType === 'CASH' || 'CHECK' ? receipt.price : -receipt.price;
           await this.boxListsService.updateBox(boxList.id, {
             totalPrice: boxList.totalPrice,
           }, queryRunner.manager);
