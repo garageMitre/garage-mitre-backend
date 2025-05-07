@@ -158,10 +158,10 @@ export class ReceiptsService {
         if (!boxList) {
           boxList = await this.boxListsService.createBox({
             date: now,
-            totalPrice: receipt.paymentType === 'CASH' || 'CHECK' ? receipt.price : -receipt.price,
+            totalPrice:(receipt.paymentType === 'CASH' || receipt.paymentType === 'CHECK') ? receipt.price : -receipt.price,
           });
         } else {
-          boxList.totalPrice += receipt.paymentType === 'CASH' || 'CHECK' ? receipt.price : -receipt.price;
+          boxList.totalPrice += (receipt.paymentType === 'CASH' || receipt.paymentType === 'CHECK') ? receipt.price : -receipt.price;
           await this.boxListsService.updateBox(boxList.id, {
             totalPrice: boxList.totalPrice,
           }, queryRunner.manager);
@@ -246,7 +246,7 @@ export class ReceiptsService {
           throw new NotFoundException('Box list not found');
         }
     
-        if (lastPaidReceipt.paymentType === 'TRANSFER' || lastPaidReceipt.paymentType === 'CHECK') {
+        if (lastPaidReceipt.paymentType === 'TRANSFER') {
           boxList.totalPrice += lastPaidReceipt.price;
         } else {
           boxList.totalPrice -= lastPaidReceipt.price;
