@@ -1016,39 +1016,53 @@ async createParkingType(createParkingTypeDto: CreateParkingTypeDto) {
     }
   }
 
-async updateparkingType(parkingTypeId: string, updateParkingTypeDto: UpdateParkingTypeDto) {
-  try{
-    const parkingType = await this.parkingTypeRepository.findOne({where:{id:parkingTypeId}})
-
-    if(!parkingType){
-      throw new NotFoundException('ParkingType not found')
-    }
-    const owners = await this.customerRepository.find({where:{customerType:'OWNER'}});
-    const differenceAmount = updateParkingTypeDto.amount > parkingType.amount ? updateParkingTypeDto.amount - parkingType.amount : parkingType.amount - updateParkingTypeDto.amount;
-
-    for(const owner of owners){
-      const receipt = await this.receiptRepository.findOne({
-        where: { customer: { id: owner.id }, status: 'PENDING' },
-      });
+  async updateparkingType(parkingTypeId: string, updateParkingTypeDto: UpdateParkingTypeDto) {
+    try {
+      const parkingType = await this.parkingTypeRepository.findOne({ where: { id: parkingTypeId } });
   
-      receipt.price = updateParkingTypeDto.amount * owner.numberOfVehicles;
+      if (!parkingType) {
+        throw new NotFoundException('ParkingType not found');
+      }
 
-      await this.receiptRepository.save(receipt);
-    }
-    
-    const updateParkingType = this.parkingTypeRepository.merge(parkingType, updateParkingTypeDto);
+      const owners = await this.customerRepository.find({
+        where: { customerType: 'OWNER' },
+        relations: ['vehicles', 'vehicles.parkingType'], // Asegúrate de cargar los vehículos
+      });
 
-    const savedParkingType = await this.parkingTypeRepository.save(updateParkingType); 
+  
+      for (const owner of owners) {
+        const receipt = await this.receiptRepository.findOne({
+          where: { customer: { id: owner.id }, status: 'PENDING' },
+        });
 
-    return savedParkingType;
-  } catch (error) {
+        receipt.price = updateParkingTypeDto.amount * owner.numberOfVehicles;
+        receipt.startAmount = receipt.price;
+        await this.receiptRepository.save(receipt);
+  
+        // Actualizar precio de cada vehículo del owner con el parkingType relacionado
+        const vehiclesToUpdate = owner.vehicles.filter(
+          (vehicle) => vehicle.parkingType?.id === parkingType.id
+        );
+  
+        for (const vehicle of vehiclesToUpdate) {
+          vehicle.amount = updateParkingTypeDto.amount * owner.numberOfVehicles;
+          await this.vehicleRepository.save(vehicle);
+        }
+  
+      }
+  
+      const updatedParkingType = this.parkingTypeRepository.merge(parkingType, updateParkingTypeDto);
+      const savedParkingType = await this.parkingTypeRepository.save(updatedParkingType);
+  
+      return savedParkingType;
+    } catch (error) {
       if (!(error instanceof NotFoundException)) {
         this.logger.error(error.message, error.stack);
       }
       throw error;
     }
-}
-
+  }
+  
 async removeParkingType(parkingTypeId: string) {
   try{
     const parkingType = await this.parkingTypeRepository.findOne({where:{id:parkingTypeId}})
