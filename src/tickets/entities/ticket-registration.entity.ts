@@ -6,6 +6,7 @@ import {
   ManyToOne,
   OneToOne,
   PrimaryGeneratedColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 import { Ticket } from './ticket.entity';
 import { BoxList } from 'src/box-lists/entities/box-list.entity';
@@ -19,6 +20,9 @@ export class TicketRegistration {
 
   @Column('int')
   price: number;
+
+  @Column('varchar', {nullable: true})
+  codeBarTicket: string;
   
   @Column('date', { nullable: true })
   entryDay: string | null;
@@ -44,5 +48,8 @@ export class TicketRegistration {
 
   @CreateDateColumn()
   createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
 
 }

@@ -7,14 +7,6 @@ export class CreateTicketDto {
     @IsNotEmpty()
     codeBar: string
 
-    @IsNumber()
-    @IsNotEmpty()
-    dayPrice: number
-
-    @IsNumber()
-    @IsNotEmpty()
-    nightPrice: number
-
     @IsEnum(TICKET_TYPE)
     vehicleType: TicketType;
 }

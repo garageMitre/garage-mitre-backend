@@ -12,6 +12,10 @@ export class CreateTicketRegistrationDto {
 
     @IsString()
     @IsOptional()
+    codeBarTicket?: string
+
+    @IsString()
+    @IsOptional()
     entryDay: string
 
     @IsString()

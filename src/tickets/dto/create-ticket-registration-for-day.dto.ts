@@ -1,16 +1,48 @@
-import { IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Matches } from "class-validator";
+import { IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Matches } from "class-validator";
+import { TICKET_TIME_TYPE, TicketTimeType } from "../entities/ticket-price.entity";
 
 export class CreateTicketRegistrationForDayDto {
 
     @IsNumber()
-    @IsNotEmpty()
-    price: number
+    @IsOptional()
+    weeks: number;
 
     @IsNumber()
-    @IsNotEmpty()
-    days: number
+    @IsOptional()
+    days: number;
+    
+    @IsEnum(TICKET_TIME_TYPE)
+    ticketTimeType: TicketTimeType;
 
-    @IsNumber()
+    @IsString()
+    @IsOptional()
+    firstNameCustomer: string;
+
+    @IsString()
     @IsNotEmpty()
-    weeks: number
+    lastNameCustomer: string;
+
+    @IsString()
+    @IsOptional()
+    vehiclePlateCustomer: string;
+
+    @IsBoolean()
+    @IsOptional()
+    paid: boolean;
+
+    @IsBoolean()
+    @IsOptional()
+    retired: boolean;
+
+}
+
+
+export class UpdateTicketStatusDto {
+  @IsOptional()
+  @IsBoolean()
+  paid?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  retired?: boolean;
 }
