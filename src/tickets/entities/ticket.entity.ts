@@ -1,10 +1,12 @@
 import {
   Column,
   Entity,
+  ManyToOne,
   OneToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { TicketRegistration } from './ticket-registration.entity';
+import { TicketPrice } from './ticket-price.entity';
 
 export const TICKET_TYPE = ['AUTO', 'CAMIONETA'] as const;
 export type TicketType = (typeof TICKET_TYPE)[number];
@@ -27,7 +29,7 @@ export class Ticket {
   nightPrice: number;
   
   @Column('enum', { enum: TICKET_TYPE})
-  vehicleType: TicketType;
+  vehicleType: string;
 
   @OneToOne(() => TicketRegistration, (ticketRegistration) => ticketRegistration.ticket)
   ticketRegistration: TicketRegistration;

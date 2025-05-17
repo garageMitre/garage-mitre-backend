@@ -7,9 +7,10 @@ import { TicketRegistration } from './entities/ticket-registration.entity';
 import { BoxListsModule } from 'src/box-lists/box-lists.module';
 import { TicketGateway } from './register-gateway';
 import { TicketRegistrationForDay } from './entities/ticket-registration-for-day.entity';
+import { TicketPrice } from './entities/ticket-price.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Ticket, TicketRegistration, TicketRegistrationForDay]), BoxListsModule],
+  imports: [TypeOrmModule.forFeature([Ticket, TicketRegistration, TicketRegistrationForDay, TicketPrice]), BoxListsModule],
   controllers: [TicketsController],
   providers: [TicketsService, TicketGateway],
   exports: [TicketsService]
