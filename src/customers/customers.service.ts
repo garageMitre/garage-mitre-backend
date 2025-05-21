@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { CreateCustomerDto, CreateVehicleDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, ILike, QueryFailedError, Raw, Repository } from 'typeorm';
+import { DataSource, ILike, In, QueryFailedError, Raw, Repository } from 'typeorm';
 import { Customer, CustomerType } from './entities/customer.entity';
 import { ReceiptsService } from 'src/receipts/receipts.service';
 import { addMonths, startOfMonth } from 'date-fns';
@@ -61,49 +61,48 @@ export class CustomersService {
       await queryRunner.startTransaction();
       try{
 
-        const customerRepo = queryRunner.manager.getRepository(Customer);
-        const vehicleRepo = queryRunner.manager.getRepository(Vehicle);
-        const vehicleRenterRepo = queryRunner.manager.getRepository(VehicleRenter);
-
-        const customerRenters = await customerRepo.find({where:{customerType:'RENTER'}, relations:['vehicles', 'vehicleRenters', 'receipts']});
+ 
+        const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
+        const nextMonthStartDate = argentinaTime.month(5).startOf('month').format('YYYY-MM-DD');
         
-        for(const customerRenter of customerRenters){
-          for(const vehicle of customerRenter.vehicles){
-            await vehicleRepo.remove(vehicle);
-          }
-          for(const receiptRenter of customerRenter.receipts){
-            await this.receiptRepository.remove(receiptRenter);
-          }
+        const customers = await this.customerRepository.find({
+          relations: ['receipts','vehicles','vehicles.parkingType','vehicleRenters', 'vehicles.vehicleRenters', 'vehicleRenters.customer', 'vehicleRenters.vehicle', 'vehicleRenters.vehicle.customer'],
+        })
+
+
+      for (const customer of customers) {
+        const receiptsToRemove = await queryRunner.manager.find(Receipt, {
+          where: { customer: { id: customer.id } },
+        });
+
+        if (receiptsToRemove.length) {
+          await queryRunner.manager.remove(Receipt, receiptsToRemove);
         }
-        const customerOwners = await customerRepo.find({where:{customerType:'OWNER'}, relations:['vehicles', 'receipts']});
+        customer.startDate = nextMonthStartDate;
+        await queryRunner.manager.save(customer);
 
+        // b) Recalcular monto total
+        const totalVehicleAmount =
+          customer.customerType === 'OWNER'
+            ? customer.vehicles?.reduce((sum, v) => sum + (v.amount || 0), 0)
+            : customer.vehicleRenters?.reduce((sum, vr) => sum + (vr.amount || 0), 0);
 
-
-        for(const customer of customerOwners){
-          const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
-          const nextMonthStartDate = argentinaTime.month(4).startOf('month').format('YYYY-MM-DD');
-
-          customer.startDate = nextMonthStartDate;
-
-          await customerRepo.save(customer);
-          if (customer.receipts) {
-            const receipts = customer.receipts.sort(
-              (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
-            );
-            const pendingReceipt = receipts.find((r) => r.status === 'PENDING');
-            
-            if (pendingReceipt) {
-              await this.receiptRepository.remove(pendingReceipt);
-            }
-          }
-          const totalVehicleAmount = customer.vehicles.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0)
-    
-        // 👇 Y pasamos el total correctamente
-         await this.receiptsService.createReceipt(customer.id, queryRunner.manager, totalVehicleAmount);
+        // c) Decidir si crear recibo
+        let shouldCreateReceipt = true;
+        if (customer.customerType !== 'OWNER') {
+          shouldCreateReceipt =
+            createCustomerDto.vehicleRenters?.every(vr => vr.owner !== '') ?? true;
         }
-        
-        await queryRunner.commitTransaction();
-        return customerOwners && customerRenters;
+
+        // d) Crear nuevo recibo usando el mismo queryRunner
+        if (shouldCreateReceipt) {
+          await this.receiptsService.createReceipt(
+            customer.id,
+            queryRunner.manager,
+            totalVehicleAmount,
+          );
+        }
+      }
 
       } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -139,8 +138,28 @@ export class CustomersService {
         
     
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
-        const nextMonthStartDate = argentinaTime.month(4).startOf('month').format('YYYY-MM-DD');
+        const nextMonthStartDate = argentinaTime.add(1, 'month').startOf('month').format('YYYY-MM-DD');
+
         customer.startDate = nextMonthStartDate;
+        
+        const customers = await this.customerRepository.find({
+          relations: ['receipts','vehicles','vehicles.parkingType','vehicleRenters', 'vehicles.vehicleRenters', 'vehicleRenters.customer', 'vehicleRenters.vehicle', 'vehicleRenters.vehicle.customer'],
+        })
+
+
+for (const customer of customers) {
+  // 1) Eliminamos los recibos PAID
+  // 2) A los recibos PENDING que queden, actualizamos startDate
+  const pendingReceipts = customer.receipts.filter(r => r.status === 'PENDING');
+  for (const receipt of pendingReceipts) {
+    receipt.startDate = nextMonthStartDate;
+    await queryRunner.manager.save(receipt);
+  }
+
+  // 3) Finalmente, actualizamos el startDate del cliente
+  customer.startDate = nextMonthStartDate;
+  await queryRunner.manager.save(customer);
+}
     
         const savedCustomer = await customerRepo.save(customer);
     
