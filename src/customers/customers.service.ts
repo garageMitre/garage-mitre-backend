@@ -142,25 +142,6 @@ export class CustomersService {
 
         customer.startDate = nextMonthStartDate;
         
-        const customers = await this.customerRepository.find({
-          relations: ['receipts','vehicles','vehicles.parkingType','vehicleRenters', 'vehicles.vehicleRenters', 'vehicleRenters.customer', 'vehicleRenters.vehicle', 'vehicleRenters.vehicle.customer'],
-        })
-
-
-for (const customer of customers) {
-  // 1) Eliminamos los recibos PAID
-  // 2) A los recibos PENDING que queden, actualizamos startDate
-  const pendingReceipts = customer.receipts.filter(r => r.status === 'PENDING');
-  for (const receipt of pendingReceipts) {
-    receipt.startDate = nextMonthStartDate;
-    await queryRunner.manager.save(receipt);
-  }
-
-  // 3) Finalmente, actualizamos el startDate del cliente
-  customer.startDate = nextMonthStartDate;
-  await queryRunner.manager.save(customer);
-}
-    
         const savedCustomer = await customerRepo.save(customer);
     
         const vehicles = [];
