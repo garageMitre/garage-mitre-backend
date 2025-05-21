@@ -52,6 +52,12 @@ export class TicketsController {
     return this.ticketsService.remove(id);
   }
 
+  @Delete('registrationForDays/:id')
+  removeRegistrationForDay(@Param('id') id: string) {
+    return this.ticketsService.removeRegistrationForDay(id);
+  }
+
+
   @Post('ticketsPrice')
   createTicketPrice(@Body() createTicketPriceDto: CreateTicketPriceDto) {
     return this.ticketsService.createTicketPrice(createTicketPriceDto);

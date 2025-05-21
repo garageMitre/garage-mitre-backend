@@ -417,6 +417,37 @@ async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRe
     return this.ticketRegistrationForDayRepository.save(ticket);
   }
 
+    async removeRegistrationForDay(id: string) {
+    try{
+      const ticket = await this.ticketRegistrationForDayRepository.findOne({where:{id:id}})
+      let boxList = await this.boxListsService.findBoxByDate(ticket.dateNow);
+  
+      if (!boxList) {
+        throw new NotFoundException('Box list not found');
+      }
+
+      boxList.totalPrice -= ticket.price;
+
+      await this.boxListsService.updateBox(boxList.id, {
+        totalPrice: boxList.totalPrice,
+      });
+
+      if(!ticket){
+        throw new NotFoundException('Ticket list not found')
+      }
+
+      await this.ticketRegistrationForDayRepository.remove(ticket);
+
+      return {message: 'Ticket list removed successfully'}
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) {
+        this.logger.error(error.message, error.stack);
+      }
+      throw error;
+    }
+  }
+
+
 
 
 async updateRegistration(existingRegistration: TicketRegistration, formattedDay: string, ticket: Ticket) {
