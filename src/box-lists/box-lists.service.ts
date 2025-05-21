@@ -31,46 +31,45 @@ export class BoxListsService {
       
     ) {}
 
-    async createBox(createBoxListDto: CreateBoxListDto) {
-      const queryRunner = this.dataSource.createQueryRunner();
-    
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
-    
-      try {
-        const repo = queryRunner.manager.getRepository(BoxList);
-    
-        // Bloquea el último box para evitar condiciones de carrera
-        const lastBox = await repo
-          .createQueryBuilder("box")
-          .setLock("pessimistic_write") // <- importante
-          .orderBy("box.id", "ASC")
-          .getOne();
+async createBox(createBoxListDto: CreateBoxListDto) {
+  const queryRunner = this.dataSource.createQueryRunner();
 
-    
-        let newBoxNumber = 1;
-        if (lastBox?.boxNumber) {
-          newBoxNumber = lastBox.boxNumber + 1;
-        }
-    
-        const box = repo.create({
-          ...createBoxListDto,
-          boxNumber: newBoxNumber,
-        });
-    
-        const savedBox = await repo.save(box);
-        await queryRunner.commitTransaction();
-    
-        return savedBox;
-      } catch (error) {
-        await queryRunner.rollbackTransaction();
-        this.logger.error(error.message, error.stack);
-        throw error;
-      } finally {
-        await queryRunner.release();
-      }
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
+  try {
+    const repo = queryRunner.manager.getRepository(BoxList);
+
+    // Bloquea el último boxNumber para evitar condiciones de carrera
+    const lastBox = await repo
+      .createQueryBuilder("box")
+      .setLock("pessimistic_write") // bloquea la fila para escritura
+      .orderBy("box.boxNumber", "DESC") // obtener el mayor boxNumber
+      .getOne();
+
+    let newBoxNumber = 1;
+    if (lastBox?.boxNumber) {
+      newBoxNumber = lastBox.boxNumber + 1;
     }
-    
+
+    const box = repo.create({
+      ...createBoxListDto,
+      boxNumber: newBoxNumber,
+    });
+
+    const savedBox = await repo.save(box);
+    await queryRunner.commitTransaction();
+
+    return savedBox;
+  } catch (error) {
+    await queryRunner.rollbackTransaction();
+    this.logger.error(error.message, error.stack);
+    throw error;
+  } finally {
+    await queryRunner.release();
+  }
+}
+
     
   async getAllboxes(){
     try{
