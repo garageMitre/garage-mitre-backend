@@ -30,74 +30,113 @@ export class ReceiptsService {
         private readonly dataSource: DataSource,
     ) {}
 
-    async createReceipt(customerId: string, manager: EntityManager, price?: number): Promise<Receipt> {
+      async resequenceOwnerReceipts(): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // 1) Obtengo todos los OWNER receipts ordenados por updateAt asc
+      const ownerReceipts: Receipt[] = await queryRunner.manager.find(Receipt, {
+        where: { receiptTypeKey: 'OWNER' },
+        order: { updateAt: 'ASC' },
+      });
+
+      // 2) Iterar y asignar nuevos números
+      for (let index = 0; index < ownerReceipts.length; index++) {
+        const r = ownerReceipts[index];
+        // Número de serie: 4 dígitos, siempre "0000" en este caso
+        const shortPart = '0000';
+
+        // Incremento la parte larga: index + 1
+        const longPart = (index + 1).toString().padStart(8, '0');
+
+        r.receiptNumber = `N° ${shortPart}-${longPart}`;
+        await queryRunner.manager.save(r);
+      }
+
+      await queryRunner.commitTransaction();
+      this.logger.log(
+        `Re-secuenciados ${ownerReceipts.length} recibos OWNER correctamente`
+      );
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error('Error al re-secuenciar OWNER receipts', err.stack);
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+    async createReceipt(customerId: string, manager: EntityManager, price?: number){
       try {
-        const customer = await manager.findOne(Customer, {
-          where: { id: customerId },
-          relations: ['vehicles', 'vehicleRenters'],
-        });
+        await this.resequenceOwnerReceipts()
+        // const customer = await manager.findOne(Customer, {
+        //   where: { id: customerId },
+        //   relations: ['vehicles', 'vehicleRenters'],
+        // });
     
-        if (!customer) {
-          throw new NotFoundException('Customer not found');
-        }
+        // if (!customer) {
+        //   throw new NotFoundException('Customer not found');
+        // }
     
-        const length = Math.random() < 0.5 ? 11 : 15;
-        const barcode = Array.from({ length }, () => Math.floor(Math.random() * 10)).join('');
-        const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
+        // const length = Math.random() < 0.5 ? 11 : 15;
+        // const barcode = Array.from({ length }, () => Math.floor(Math.random() * 10)).join('');
+        // const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
     
-        // DEFINICIÓN DE TIPO DE RECIBO
-        let receiptTypeKey = 'OWNER';
+        // // DEFINICIÓN DE TIPO DE RECIBO
+        // let receiptTypeKey = 'OWNER';
     
-        const manualRenters = [
-          'JOSE_RICARDO_AZNAR',
-          'CARLOS_ALBERTO_AZNAR',
-          'NIDIA_ROSA_MARIA_FONTELA',
-          'ALDO_RAUL_FONTELA',
-        ];
+        // const manualRenters = [
+        //   'JOSE_RICARDO_AZNAR',
+        //   'CARLOS_ALBERTO_AZNAR',
+        //   'NIDIA_ROSA_MARIA_FONTELA',
+        //   'ALDO_RAUL_FONTELA',
+        // ];
     
-        if (customer.customerType === 'RENTER') {
-          const matchedOwner = customer.vehicleRenters.find(renter =>
-            manualRenters.includes(renter.owner)
-          );
-          if (matchedOwner) {
-            receiptTypeKey = matchedOwner.owner;
-          } else {
-            // Renter sin owner manual: opcionalmente podrías lanzar error o usar un default
-            receiptTypeKey = 'GARAGE_MITRE';
-          }
-        }
+        // if (customer.customerType === 'RENTER') {
+        //   const matchedOwner = customer.vehicleRenters.find(renter =>
+        //     manualRenters.includes(renter.owner)
+        //   );
+        //   if (matchedOwner) {
+        //     receiptTypeKey = matchedOwner.owner;
+        //   } else {
+        //     // Renter sin owner manual: opcionalmente podrías lanzar error o usar un default
+        //     receiptTypeKey = 'GARAGE_MITRE';
+        //   }
+        // }
     
-        // CONSULTA AL ÚLTIMO NÚMERO DE RECIBO PARA ESTE TIPO
-        const lastReceipt = await manager
-          .createQueryBuilder(Receipt, 'receipt')
-          .where('receipt.receiptTypeKey = :type', { type: receiptTypeKey })
-          .andWhere('receipt.receiptNumber IS NOT NULL')
-          .orderBy('receipt.updateAt', 'DESC')
-          .getOne();
+        // // CONSULTA AL ÚLTIMO NÚMERO DE RECIBO PARA ESTE TIPO
+        // const lastReceipt = await manager
+        //   .createQueryBuilder(Receipt, 'receipt')
+        //   .where('receipt.receiptTypeKey = :type', { type: receiptTypeKey })
+        //   .andWhere('receipt.receiptNumber IS NOT NULL')
+        //   .orderBy('receipt.updateAt', 'DESC')
+        //   .getOne();
     
-        // CREAR NUEVO RECIBO
-        const receipt = manager.create(Receipt, {
-          customer,
-          price,
-          startAmount: price,
-          dateNow: argentinaTime.format('YYYY-MM-DD'),
-          startDate: customer.startDate,
-          barcode: barcode,
-          receiptTypeKey // este campo debe estar en la entidad `Receipt`
-        });
+        // // CREAR NUEVO RECIBO
+        // const receipt = manager.create(Receipt, {
+        //   customer,
+        //   price,
+        //   startAmount: price,
+        //   dateNow: argentinaTime.format('YYYY-MM-DD'),
+        //   startDate: customer.startDate,
+        //   barcode: barcode,
+        //   receiptTypeKey // este campo debe estar en la entidad `Receipt`
+        // });
     
-        if (lastReceipt && lastReceipt.receiptNumber) {
-          const [shortNumber, longNumber] = lastReceipt.receiptNumber.split('-').map(num => num.replace('N° ', '').trim());
+        // if (lastReceipt && lastReceipt.receiptNumber) {
+        //   const [shortNumber, longNumber] = lastReceipt.receiptNumber.split('-').map(num => num.replace('N° ', '').trim());
     
-          const incrementedShortNumber = parseInt(shortNumber).toString().padStart(4, '0');
-          const incrementedLongNumber = (parseInt(longNumber) + 1).toString().padStart(8, '0');
+        //   const incrementedShortNumber = parseInt(shortNumber).toString().padStart(4, '0');
+        //   const incrementedLongNumber = (parseInt(longNumber) + 1).toString().padStart(8, '0');
     
-          receipt.receiptNumber = `N° ${incrementedShortNumber}-${incrementedLongNumber}`;
-        } else {
-          receipt.receiptNumber = 'N° 0000-00000001';
-        }
+        //   receipt.receiptNumber = `N° ${incrementedShortNumber}-${incrementedLongNumber}`;
+        // } else {
+        //   receipt.receiptNumber = 'N° 0000-00000001';
+        // }
     
-        return await manager.save(receipt);
+        // return await manager.save(receipt);
       } catch (error) {
         if (!(error instanceof NotFoundException)) {
           this.logger.error(error.message, error.stack);
