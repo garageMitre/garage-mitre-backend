@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 import { BoxList } from 'src/box-lists/entities/box-list.entity';
 import { TICKET_TIME_TYPE, TicketTimeType } from './ticket-price.entity';
+import { TICKET_TYPE } from './ticket.entity';
 
 @Entity({ name: 'ticket_registration_for_days' })
 export class TicketRegistrationForDay {
@@ -42,6 +43,9 @@ export class TicketRegistrationForDay {
   @Column('varchar', { length: 50, nullable:true  })
   vehiclePlateCustomer: string;
 
+  @Column('enum', { enum: TICKET_TYPE})
+  vehicleType: string;
+  
   @Column('boolean', { nullable: true })
   paid: boolean;
 

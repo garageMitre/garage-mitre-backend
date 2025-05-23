@@ -1,5 +1,6 @@
 import { IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Matches } from "class-validator";
 import { TICKET_TIME_TYPE, TicketTimeType } from "../entities/ticket-price.entity";
+import { TICKET_TYPE, TicketType } from "../entities/ticket.entity";
 
 export class CreateTicketRegistrationForDayDto {
 
@@ -13,6 +14,9 @@ export class CreateTicketRegistrationForDayDto {
     
     @IsEnum(TICKET_TIME_TYPE)
     ticketTimeType: TicketTimeType;
+
+    @IsEnum(TICKET_TYPE)
+    vehicleType: TicketType;
 
     @IsString()
     @IsOptional()

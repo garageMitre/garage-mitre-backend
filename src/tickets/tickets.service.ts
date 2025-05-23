@@ -45,7 +45,7 @@ export class TicketsService {
 
   async createTicketPrice(createTicketPriceDto: CreateTicketPriceDto) {
     try {
-      if(createTicketPriceDto.vehicleType){
+      if(createTicketPriceDto.vehicleType && createTicketPriceDto.ticketTimeType === null){
         const type = await this.ticketPriceRepository.find({where:{vehicleType:createTicketPriceDto.vehicleType}})
         if(type.length > 0){
           throw new NotFoundException({
@@ -54,12 +54,17 @@ export class TicketsService {
           });
         }
       }else if(createTicketPriceDto.ticketTimeType){
-        const ticketTime = await this.ticketPriceRepository.find({where:{ticketTimeType:createTicketPriceDto.ticketTimeType}})
+        const ticketTime = await this.ticketPriceRepository.find({
+            where: {
+              ticketTimeType: createTicketPriceDto.ticketTimeType,
+              vehicleType: createTicketPriceDto.vehicleType,
+            },
+          });
         console.log(ticketTime)
         if(ticketTime.length > 0){
           throw new NotFoundException({
             code: 'TICKET_TIME_PRICE_TYPE_FOUND',
-            message: `Ya existe un precio para el tipo de ticket ${createTicketPriceDto.ticketTimeType}`,
+            message: `Ya existe un precio para el tipo de ticket ${createTicketPriceDto.ticketTimeType} con el tipo ${createTicketPriceDto.vehicleType}`,
           });
         }
       }
@@ -93,7 +98,7 @@ export class TicketsService {
 async updateTicketPrice(id: string, updateTicketPriceDto: UpdateTicketPriceDto) {
   try{
     const ticketPrice = await this.ticketPriceRepository.findOne({where:{id:id}})
-    if(updateTicketPriceDto.vehicleType){
+    if(updateTicketPriceDto.vehicleType && updateTicketPriceDto.ticketTimeType === null){
       const type = await this.ticketPriceRepository.find({where:{vehicleType:updateTicketPriceDto.vehicleType}})
       if(type && ticketPrice.vehicleType !== updateTicketPriceDto.vehicleType){
         throw new NotFoundException({
@@ -102,11 +107,16 @@ async updateTicketPrice(id: string, updateTicketPriceDto: UpdateTicketPriceDto) 
         });
       }
     } else if(updateTicketPriceDto.ticketTimeType){
-        const ticketTime = await this.ticketPriceRepository.find({where:{ticketTimeType:updateTicketPriceDto.ticketTimeType}})
+        const ticketTime = await this.ticketPriceRepository.find({
+            where: {
+              ticketTimeType: updateTicketPriceDto.ticketTimeType,
+              vehicleType: updateTicketPriceDto.vehicleType,
+            },
+          });
         if(ticketTime && ticketPrice.ticketTimeType !== updateTicketPriceDto.ticketTimeType){
           throw new NotFoundException({
             code: 'TICKET_TIME_PRICE_TYPE_FOUND',
-            message: `Ya existe un precio para el tipo de ticket ${updateTicketPriceDto.ticketTimeType}`,
+            message: `Ya existe un precio para el tipo de ticket ${updateTicketPriceDto.ticketTimeType} con el tipo ${updateTicketPriceDto.vehicleType}`,
           });
         }
     }
@@ -313,7 +323,7 @@ async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRe
       time = `${createTicketRegistrationForDayDto.weeks} semana/s y ${createTicketRegistrationForDayDto.days} día/s`;
     }
 
-    ticket.description = `Tipo: ${
+    ticket.description = `Tipo: ${createTicketRegistrationForDayDto.vehicleType}, ${
       createTicketRegistrationForDayDto.ticketTimeType === 'DIA'
         ? 'Día/s'
         : createTicketRegistrationForDayDto.ticketTimeType === 'SEMANA'
@@ -327,7 +337,7 @@ async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRe
     ticket.dateNow = now;
 
     if(createTicketRegistrationForDayDto.ticketTimeType !== 'SEMANA_Y_DIA'){
-      const ticketPrice = await this.ticketPriceRepository.findOne({where:{ticketTimeType:createTicketRegistrationForDayDto.ticketTimeType}})
+      const ticketPrice = await this.ticketPriceRepository.findOne({where:{ticketTimeType:createTicketRegistrationForDayDto.ticketTimeType, vehicleType: createTicketRegistrationForDayDto.vehicleType}})
       if(!ticketPrice){
         throw new NotFoundException({
           code: 'TICKET_PRICE_NOT_FOUND',
@@ -340,8 +350,10 @@ async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRe
       const ticketPrices = await this.ticketPriceRepository.find({
         where: {
           ticketTimeType: In(['DIA', 'SEMANA']),
+          vehicleType: createTicketRegistrationForDayDto.vehicleType,
         },
       });
+
 
       if(ticketPrices.length < 1){
         throw new NotFoundException({
