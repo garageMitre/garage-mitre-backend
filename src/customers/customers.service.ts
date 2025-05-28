@@ -258,13 +258,18 @@ export class CustomersService {
             }
 
             const customers = await this.customerRepository.find({relations:['receipts']})
-            const dateString = dayjs.tz('2025-06-01', 'America/Argentina/Buenos_Aires').toDate();
+
             for(const customer of customers){
-              customer.startDate = '2025-06-01'
-              for(const receipt of customer.receipts){
-receipt.startDate = dateString as unknown as string;  // o modifica el tipo a Date directamente
-receipt.dateNow = dateString as unknown as string;
-                await this.receiptRepository.save(receipt)
+              const dateString = dayjs
+              .tz('2025-06-01', 'America/Argentina/Buenos_Aires')
+              .format('YYYY-MM-DD');
+              customer.startDate = dateString
+              await this.customerRepository.save(customer)
+
+              for (const receipt of customer.receipts) {
+                receipt.startDate = dateString;
+                receipt.dateNow   = dateString;
+                await this.receiptRepository.save(receipt);
               }
 
             }
