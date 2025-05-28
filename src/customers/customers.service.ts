@@ -256,21 +256,6 @@ export class CustomersService {
             if (shouldCreateReceipt) {
               await this.receiptsService.createReceipt(savedCustomer.id, queryRunner.manager, totalVehicleAmount);
             }
-
-            const customers = await this.customerRepository.find({relations:['receipts']})
-
-            for(const customer of customers){
-            const dateString = '2025-06-02';
-              customer.startDate = dateString
-              await this.customerRepository.save(customer)
-
-              for (const receipt of customer.receipts) {
-                receipt.startDate = dateString;
-                receipt.dateNow   = dateString;
-                await this.receiptRepository.save(receipt);
-              }
-
-            }
     
         await queryRunner.commitTransaction();
         return savedCustomer;
