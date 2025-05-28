@@ -966,6 +966,7 @@ async createParkingType(createParkingTypeDto: CreateParkingTypeDto) {
       for (const owner of owners) {
           for(const receipt of owner.receipts){
             receipt.price = 0;
+            await this.receiptRepository.save(receipt)
           }
 
       }
