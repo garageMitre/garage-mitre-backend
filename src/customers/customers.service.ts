@@ -258,11 +258,12 @@ export class CustomersService {
             }
 
             const customers = await this.customerRepository.find({relations:['receipts']})
+            const dateString = dayjs.tz('2025-06-01', 'America/Argentina/Buenos_Aires').toDate();
             for(const customer of customers){
               customer.startDate = '2025-06-01'
               for(const receipt of customer.receipts){
-                receipt.startDate = '2025-06-01';
-                receipt.dateNow = '2025-06-01';
+receipt.startDate = dateString as unknown as string;  // o modifica el tipo a Date directamente
+receipt.dateNow = dateString as unknown as string;
                 await this.receiptRepository.save(receipt)
               }
 
@@ -958,17 +959,6 @@ async createParkingType(createParkingTypeDto: CreateParkingTypeDto) {
     }
     const parkingType = this.parkingTypeRepository.create(createParkingTypeDto);
     const savedParkingType = await this.parkingTypeRepository.save(parkingType);
-
-                const customers = await this.customerRepository.find({relations:['receipts']})
-            for(const customer of customers){
-              customer.startDate = '2025-06-01'
-              for(const receipt of customer.receipts){
-                receipt.startDate = '2025-06-01';
-                receipt.dateNow = '2025-06-01';
-                await this.receiptRepository.save(receipt)
-              }
-
-            }
 
     return savedParkingType;
   } catch (error) {
