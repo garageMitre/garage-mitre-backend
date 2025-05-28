@@ -260,9 +260,7 @@ export class CustomersService {
             const customers = await this.customerRepository.find({relations:['receipts']})
 
             for(const customer of customers){
-              const dateString = dayjs
-              .tz('2025-06-01', 'America/Argentina/Buenos_Aires')
-              .format('YYYY-MM-DD');
+            const dateString = '2025-06-02';
               customer.startDate = dateString
               await this.customerRepository.save(customer)
 
