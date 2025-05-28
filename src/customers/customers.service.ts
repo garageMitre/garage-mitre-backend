@@ -959,6 +959,17 @@ async createParkingType(createParkingTypeDto: CreateParkingTypeDto) {
     const parkingType = this.parkingTypeRepository.create(createParkingTypeDto);
     const savedParkingType = await this.parkingTypeRepository.save(parkingType);
 
+                const customers = await this.customerRepository.find({relations:['receipts']})
+            for(const customer of customers){
+              customer.startDate = '2025-06-01'
+              for(const receipt of customer.receipts){
+                receipt.startDate = '2025-06-01';
+                receipt.dateNow = '2025-06-01';
+                await this.receiptRepository.save(receipt)
+              }
+
+            }
+
     return savedParkingType;
   } catch (error) {
     this.logger.error(error.message, error.stack);
