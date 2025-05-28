@@ -263,6 +263,7 @@ export class CustomersService {
               for(const receipt of customer.receipts){
                 receipt.startDate = '2025-06-01';
                 receipt.dateNow = '2025-06-01';
+                await this.receiptRepository.save(receipt)
               }
 
             }
@@ -957,19 +958,6 @@ async createParkingType(createParkingTypeDto: CreateParkingTypeDto) {
     }
     const parkingType = this.parkingTypeRepository.create(createParkingTypeDto);
     const savedParkingType = await this.parkingTypeRepository.save(parkingType);
-
-          const owners = await this.customerRepository.find({
-        where: { customerType: 'OWNER' },
-        relations: ['vehicles', 'vehicles.parkingType', 'receipts'], // Asegúrate de cargar los vehículos
-      });
-
-      for (const owner of owners) {
-          for(const receipt of owner.receipts){
-            receipt.price = 0;
-            await this.receiptRepository.save(receipt)
-          }
-
-      }
 
     return savedParkingType;
   } catch (error) {
