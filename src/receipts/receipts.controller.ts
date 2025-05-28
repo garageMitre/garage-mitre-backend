@@ -26,4 +26,19 @@ export class ReceiptsController {
     async findAllPendingReceipts( @Param('customerType') customer: CustomerType) {
         return await this.receiptsService.findAllPendingReceipts(customer);
     }
+
+  @Post('generate-manual/:customerType')
+  async generateReceiptsManual(@Param('customerType') customer: CustomerType, @Body() body: { dateNow: string }) {
+    const { dateNow } = body;
+
+    if (!dateNow) {
+      throw new Error('Debe enviar una fecha válida en el cuerpo de la solicitud.');
+    }
+
+    await this.receiptsService.createReceiptMan(dateNow, customer);
+
+    return {
+      message: `Recibos generados (si faltaban) para el mes de ${dateNow}`,
+    };
+  }
 }

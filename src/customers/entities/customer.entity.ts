@@ -50,6 +50,9 @@ export type CustomerType = (typeof CUSTOMER_TYPE)[number];
     @Column('enum', { enum: CUSTOMER_TYPE})
     customerType: CustomerType;
 
+    @Column('bool', { nullable:true, default:false })
+    hasDebt: boolean;
+
     @OneToMany(() => Vehicle, (vehicle) => vehicle.customer, { cascade: true})
     vehicles: Vehicle[];
 

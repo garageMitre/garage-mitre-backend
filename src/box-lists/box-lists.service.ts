@@ -11,6 +11,7 @@ import * as dayjs from 'dayjs';
 import * as utc from 'dayjs/plugin/utc';
 import * as timezone from 'dayjs/plugin/timezone';
 import * as isBetween from 'dayjs/plugin/isBetween'; 
+import { UpdateOtherPaymentDto } from './dto/update-other-payment.dto';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -204,5 +205,62 @@ async createBox(createBoxListDto: CreateBoxListDto) {
       this.logger.error(error.message, error.stack);
     }
   }
+
+    async updateOtherPayment(id: string, updateOtherPaymentDto: UpdateOtherPaymentDto) {
+    try{
+      const expense = await this.otherPaymentepository.findOne({where:{id:id}})
+
+      if(!expense){
+        throw new NotFoundException('Expense not found')
+      }
+
+      const otherPayment = this.otherPaymentepository.merge(expense, updateOtherPaymentDto);
+
+      const boxList = await this.boxListRepository.findOne({where:{id:expense.boxList.id}})
+
+      boxList.totalPrice = boxList.totalPrice - expense.price + updateOtherPaymentDto.price;
+
+      await this.boxListRepository.save(boxList);
+
+      const savedOtherPayment = await this.otherPaymentepository.save(otherPayment); 
+
+      return savedOtherPayment;
+    } catch (error) {
+      this.logger.error(error.message, error.stack);
+    }
+  }
+
+    async findAllOtherPayment(){
+      try {
+        const expenses = await this.otherPaymentepository.find({
+          relations: ['boxList',],
+        })
+  
+          return expenses;
+      } catch (error) {
+        this.logger.error(error.message, error.stack);
+      }
+    }
+
+    async removeOtherPayment(id: string) {
+    try{
+      const expense = await this.otherPaymentepository.findOne({where:{id:id}})
+
+      if(!expense){
+        throw new NotFoundException('Expense not found')
+      }
+
+      await this.otherPaymentepository.remove(expense);
+
+      return {message: 'Expense removed successfully'}
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) {
+        this.logger.error(error.message, error.stack);
+      }
+      throw error;
+    }
+  }
+
+
 
 }

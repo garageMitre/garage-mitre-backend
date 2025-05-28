@@ -12,6 +12,7 @@ import * as dayjs from 'dayjs';
 import * as utc from 'dayjs/plugin/utc';
 import * as timezone from 'dayjs/plugin/timezone';
 import * as isBetween from 'dayjs/plugin/isBetween'; 
+import { Cron } from '@nestjs/schedule';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -30,82 +31,88 @@ export class ReceiptsService {
         private readonly dataSource: DataSource,
     ) {}
 
-    async createReceipt(customerId: string, manager: EntityManager, price?: number): Promise<Receipt> {
-      try {
-        const customer = await manager.findOne(Customer, {
-          where: { id: customerId },
-          relations: ['vehicles', 'vehicleRenters'],
-        });
-    
-        if (!customer) {
-          throw new NotFoundException('Customer not found');
-        }
-    
-        const length = Math.random() < 0.5 ? 11 : 15;
-        const barcode = Array.from({ length }, () => Math.floor(Math.random() * 10)).join('');
-        const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
-    
-        // DEFINICIÓN DE TIPO DE RECIBO
-        let receiptTypeKey = 'OWNER';
-    
-        const manualRenters = [
-          'JOSE_RICARDO_AZNAR',
-          'CARLOS_ALBERTO_AZNAR',
-          'NIDIA_ROSA_MARIA_FONTELA',
-          'ALDO_RAUL_FONTELA',
-        ];
-    
-        if (customer.customerType === 'RENTER') {
-          const matchedOwner = customer.vehicleRenters.find(renter =>
-            manualRenters.includes(renter.owner)
-          );
-          if (matchedOwner) {
-            receiptTypeKey = matchedOwner.owner;
-          } else {
-            // Renter sin owner manual: opcionalmente podrías lanzar error o usar un default
-            receiptTypeKey = 'GARAGE_MITRE';
-          }
-        }
-    
-        // CONSULTA AL ÚLTIMO NÚMERO DE RECIBO PARA ESTE TIPO
-        const lastReceipt = await manager
-          .createQueryBuilder(Receipt, 'receipt')
-          .where('receipt.receiptTypeKey = :type', { type: receiptTypeKey })
-          .andWhere('receipt.receiptNumber IS NOT NULL')
-          .orderBy('receipt.updateAt', 'DESC')
-          .getOne();
-    
-        // CREAR NUEVO RECIBO
-        const receipt = manager.create(Receipt, {
-          customer,
-          price,
-          startAmount: price,
-          dateNow: argentinaTime.format('YYYY-MM-DD'),
-          startDate: customer.startDate,
-          barcode: barcode,
-          receiptTypeKey // este campo debe estar en la entidad `Receipt`
-        });
-    
-        if (lastReceipt && lastReceipt.receiptNumber) {
-          const [shortNumber, longNumber] = lastReceipt.receiptNumber.split('-').map(num => num.replace('N° ', '').trim());
-    
-          const incrementedShortNumber = parseInt(shortNumber).toString().padStart(4, '0');
-          const incrementedLongNumber = (parseInt(longNumber) + 1).toString().padStart(8, '0');
-    
-          receipt.receiptNumber = `N° ${incrementedShortNumber}-${incrementedLongNumber}`;
-        } else {
-          receipt.receiptNumber = 'N° 0000-00000001';
-        }
-    
-        return await manager.save(receipt);
-      } catch (error) {
-        if (!(error instanceof NotFoundException)) {
-          this.logger.error(error.message, error.stack);
-        }
-        throw error;
-      }
+async createReceipt(customerId: string, manager: EntityManager, price?: number, dateNow?: string, dateNowForDebt?: string): Promise<Receipt> {
+  try {
+    const customer = await manager.findOne(Customer, {
+      where: { id: customerId },
+      relations: ['vehicles', 'vehicleRenters', 'receipts'],
+    });
+
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
     }
-    
+
+    const length = Math.random() < 0.5 ? 11 : 15;
+    const barcode = Array.from({ length }, () => Math.floor(Math.random() * 10)).join('');
+    const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
+
+    // TIPO DE RECIBO
+    let receiptTypeKey = 'OWNER';
+    const manualRenters = ['JOSE_RICARDO_AZNAR', 'CARLOS_ALBERTO_AZNAR', 'NIDIA_ROSA_MARIA_FONTELA', 'ALDO_RAUL_FONTELA'];
+
+    if (customer.customerType === 'RENTER') {
+      const matchedOwner = customer.vehicleRenters.find(renter =>
+        manualRenters.includes(renter.owner)
+      );
+      receiptTypeKey = matchedOwner ? matchedOwner.owner : 'GARAGE_MITRE';
+    }
+
+    // ÚLTIMO NÚMERO PARA ESTE receiptTypeKey
+    const lastReceipt = await manager
+      .createQueryBuilder(Receipt, 'receipt')
+      .where('receipt.receiptTypeKey = :type', { type: receiptTypeKey })
+      .andWhere('receipt.receiptNumber IS NOT NULL')
+      .orderBy('receipt.createdAt', 'DESC')
+      .getOne();
+
+    // ULTIMO RECIBO DEL CLIENTE
+    const lastReceiptCustomer = await manager.findOne(Receipt, {
+      where: {
+        customer: { id: customer.id },
+        status: 'PENDING',
+      },
+      order: { createdAt: 'DESC' },
+    });
+    //PONER EL CUSTOMER.STARDATE COMO MES ACTUAL, Y QUE EN EL FRONT NO PERMITA PONER COMO DEUDA EL MES ACTUAL Y ASI ESTA 
+
+    const baseStartDate = lastReceiptCustomer?.startDate ?? customer.startDate;
+    const newStartDate = lastReceiptCustomer ? dayjs(baseStartDate).add(1, 'month').format('YYYY-MM-DD') : customer.startDate;
+
+    const nextMonthStartDate = argentinaTime
+    .startOf('month')
+    .tz('America/Argentina/Buenos_Aires') // <-- muy importante para asegurar consistencia
+    .format('YYYY-MM-DD');
+
+    // CREAR RECIBO
+    const receipt = manager.create(Receipt, {
+      customer,
+      price,
+      startAmount: price,
+      dateNow: dateNow || dateNowForDebt || nextMonthStartDate,
+      startDate: dateNow || dateNowForDebt || nextMonthStartDate,
+      barcode,
+      receiptTypeKey,
+    });
+
+    // GENERAR receiptNumber
+    if (lastReceipt && lastReceipt.receiptNumber) {
+      const [shortNumber, longNumber] = lastReceipt.receiptNumber.replace('N° ', '').split('-');
+      const nextShort = parseInt(shortNumber).toString().padStart(4, '0');
+      const nextLong = (parseInt(longNumber) + 1).toString().padStart(8, '0');
+      receipt.receiptNumber = `N° ${nextShort}-${nextLong}`;
+    } else {
+      receipt.receiptNumber = 'N° 0000-00000001';
+    }
+
+    return await manager.save(receipt);
+  } catch (error) {
+    if (!(error instanceof NotFoundException)) {
+      this.logger.error(error.message, error.stack);
+    }
+    throw error;
+  }
+}
+
 
     async updateReceipt(customerId: string, updateReceiptDto?: UpdateReceiptDto) {
       const queryRunner = this.dataSource.createQueryRunner();
@@ -121,10 +128,20 @@ export class ReceiptsService {
         if (!customer) throw new NotFoundException('Customer not found');
     
         const receipt = await queryRunner.manager.findOne(Receipt, {
-          where: { customer: { id: customer.id }, status: 'PENDING' },
+          where: {
+            customer: { id: customer.id },
+            status: 'PENDING',
+          },
+          order: {
+            dateNow: 'ASC',
+          },
         });
-    
+
+
+
         if (!receipt) throw new NotFoundException('Receipt not found');
+
+        
     
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
         const hasPaid = customer.startDate ? argentinaTime.isBefore(dayjs(customer.startDate)) : false;
@@ -135,9 +152,11 @@ export class ReceiptsService {
             message: 'This bill was already paid this month.',
           });
         }
-    
-        const nextMonthStartDate = argentinaTime.add(1, 'month').startOf('month').format('YYYY-MM-DD');
-    
+        const receiptStartDate = dayjs(receipt.startDate).tz('America/Argentina/Buenos_Aires');
+
+        // Sumar un mes al receipt.startDate y obtener el primer día del mes siguiente
+        const nextMonthStartDate = receiptStartDate.add(1, 'month').startOf('month').format('YYYY-MM-DD');
+
         customer.previusStartDate = customer.startDate;
         customer.startDate = nextMonthStartDate;
     
@@ -169,9 +188,9 @@ export class ReceiptsService {
     
         receipt.boxList = { id: boxList.id } as BoxList;
         await queryRunner.manager.save(Receipt, receipt);
-        const price = receipt.price;
-        // Crear el nuevo recibo dentro de la misma transacción
-        await this.createReceipt(customer.id, queryRunner.manager, price);
+        // const price = receipt.price;
+        // // Crear el nuevo recibo dentro de la misma transacción
+        // await this.createReceipt(customer.id, queryRunner.manager, price);
     
         await queryRunner.commitTransaction();
         return receipt;
@@ -223,9 +242,17 @@ export class ReceiptsService {
         );
     
         const pendingReceipt = receipts.find((r) => r.status === 'PENDING');
-        const lastPaidReceipt = receipts.find(
-          (r, i) => r.status === 'PAID' && receipts[i - 1]?.status === 'PENDING'
-        );
+        const lastPaidReceipt = await queryRunner.manager.findOne(Receipt, {
+          where: {
+            customer: { id: customer.id },
+            status: 'PAID',
+          },
+          order: {
+            dateNow: 'DESC',
+          },
+        });
+        console.log(lastPaidReceipt)
+
     
         if (!lastPaidReceipt) {
           throw new NotFoundException({
@@ -233,11 +260,7 @@ export class ReceiptsService {
             message: 'No receipts paid found',
           });
         }
-    
-        if (!pendingReceipt) {
-          throw new NotFoundException('No pending receipt found for this owner');
-        }
-    
+
         const receiptDate = lastPaidReceipt.paymentDate
     
         let boxList = await this.boxListsService.findBoxByDate(receiptDate, queryRunner.manager);
@@ -260,8 +283,7 @@ export class ReceiptsService {
         lastPaidReceipt.paymentDate = null;
         lastPaidReceipt.boxList = null;
         lastPaidReceipt.paymentType = null;
-        lastPaidReceipt.price = pendingReceipt.price;
-        await receiptRepo.remove(pendingReceipt);
+
     
     
         await receiptRepo.save(lastPaidReceipt);
@@ -278,6 +300,107 @@ export class ReceiptsService {
         await queryRunner.release();
       }
     }
+
+async createReceiptMan(dateNowFront: string, customerType: CustomerType): Promise<Receipt[]> {
+  const target = dayjs(dateNowFront);
+  const targetMonthString = target.format('YYYY-MM');
+
+  const qr = this.dataSource.createQueryRunner();
+  await qr.connect();
+  await qr.startTransaction();
+
+  const createdReceipts: Receipt[] = [];
+
+  try {
+    this.logger.log(`Generando recibos para ${target.format('MM/YYYY')}`);
+
+    const customers = await qr.manager.find(Customer, {
+      where: { customerType: customerType },
+      relations: ['receipts', 'vehicles', 'vehicleRenters'],
+    });
+
+    for (const customer of customers) {
+      const exists = customer.receipts.some(r => {
+        if (!r.dateNow) return false;
+        return dayjs(r.dateNow).format('YYYY-MM') === targetMonthString;
+      });
+
+      if (exists) {
+        this.logger.debug(`Cliente ${customer.id} ya tiene recibo en ${targetMonthString}, se salta.`);
+        continue;
+      }
+
+      const totalVehicleAmount =
+        customer.customerType === 'OWNER'
+          ? customer.vehicles.reduce((acc, v) => acc + (v.amount || 0), 0)
+          : customer.vehicleRenters.reduce((acc, vr) => acc + (vr.amount || 0), 0);
+
+      let shouldCreateReceipt = true;
+      if (customer.customerType !== 'OWNER') {
+        shouldCreateReceipt = customer.vehicleRenters?.every(vr => vr.owner !== '');
+      }
+
+      if (shouldCreateReceipt) {
+        const newReceipt = await this.createReceipt(customer.id, qr.manager, totalVehicleAmount, dateNowFront);
+        createdReceipts.push(newReceipt);
+      }
+    }
+
+    await qr.commitTransaction();
+    this.logger.log('Recibos del mes finalizados correctamente');
+
+    return createdReceipts;
+  } catch (err) {
+    await qr.rollbackTransaction();
+    this.logger.error('Error en generación manual de recibos', err.stack);
+    throw err;
+  } finally {
+    await qr.release();
+  }
+}
+
+
+// @Cron('* * * * *', { timeZone: 'America/Argentina/Buenos_Aires' })
+// async createReceiptAutm() {
+//   const queryRunner = this.dataSource.createQueryRunner();
+//   await queryRunner.connect();
+//   await queryRunner.startTransaction();  // ← inicia la transacción aquí
+//   try {
+//     this.logger.log('Ejecutando cron updateInterests...');
+//     const customers = await this.customerRepository.find({
+//       relations: ['receipts','vehicles','vehicleRenters','vehicleRenters.vehicle'],
+//     });
+
+//     for (const customer of customers) {
+//       // calcular monto...
+//       const totalVehicleAmount =
+//         customer.customerType === 'OWNER'
+//           ? customer.vehicles.reduce((acc, v) => acc + (v.amount || 0), 0)
+//           : customer.vehicleRenters.reduce((acc, vr) => acc + (vr.amount || 0), 0);
+
+//       let shouldCreateReceipt = true;
+//       if (customer.customerType !== 'OWNER') {
+//         shouldCreateReceipt = customer.vehicleRenters?.every(vr => vr.owner !== '');
+//       }
+
+//       if (shouldCreateReceipt) {
+//         await this.createReceipt(customer.id, queryRunner.manager, totalVehicleAmount);
+//       }
+//     }
+
+//     // ⬇️ Un único commit al final, fuera del for
+//     await queryRunner.commitTransaction();
+//     this.logger.log('updateInterests: transacción confirmada');
+//   } catch (error) {
+//     // rollback en caso de cualquier fallo
+//     await queryRunner.rollbackTransaction();
+//     this.logger.error('Error al actualizar intereses', error.stack);
+//   } finally {
+//     await queryRunner.release();
+//   }
+// }
+
+
 
     async findAllPendingReceipts(customerType: CustomerType) {
       try {
@@ -327,6 +450,27 @@ export class ReceiptsService {
         }
         throw error;
       }
+    }
+
+    async createReceiptForDebt(customerId: string, monthDebt: string, price: number){
+        const qr = this.dataSource.createQueryRunner();
+        await qr.connect();
+        await qr.startTransaction();
+      try{
+
+        console.log(customerId)
+        console.log(monthDebt)
+        console.log(price)
+       await this.createReceipt(customerId, qr.manager, price, monthDebt);
+
+      }catch (error) {
+        if (!(error instanceof NotFoundException)) {
+          this.logger.error(error.message, error.stack);
+        }
+        throw error;
+      }finally {
+      await qr.release();
+    }
     }
 
 }

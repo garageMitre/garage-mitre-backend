@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Put, Body, Param, NotFoundException, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, NotFoundException, UseGuards, Delete } from '@nestjs/common';
 import { BoxListsService } from './box-lists.service';
 import { CreateBoxListDto } from './dto/create-box-list.dto';
 import { UpdateBoxListDto } from './dto/update-box-list.dto';
 import { CreateOtherPaymentDto } from './dto/create-other-payment.dto';
 import { AuthOrTokenAuthGuard } from 'src/utils/guards/auth-or-token.guard';
+import { UpdateOtherPaymentDto } from './dto/update-other-payment.dto';
 
 @Controller('box-lists')
 @UseGuards(AuthOrTokenAuthGuard)
@@ -18,6 +19,10 @@ export class BoxListsController {
   @Get()
   async getAllboxes() {
       return await this.boxListsService.getAllboxes();
+  }
+    @Get('otherPayment')
+  async findAllOtherPayment() {
+    return await this.boxListsService.findAllOtherPayment();
   }
 
   @Get(':id')
@@ -50,6 +55,18 @@ export class BoxListsController {
   @Post('otherPayment')
   async createOtherPayment(@Body() createOtherPaymentDto: CreateOtherPaymentDto) {
     return await this.boxListsService.createOtherPayment(createOtherPaymentDto);
+  }
+
+
+
+  @Put('otherPayment/:id')
+  async updateOtherPayment(@Param('id') id: string, @Body() updateOtherPaymentDto: UpdateOtherPaymentDto) {
+    return await this.boxListsService.updateOtherPayment(id, updateOtherPaymentDto);
+  }
+
+  @Delete('otherPayment/:id')
+  async removeBox(@Param('id') id: string) {
+    return await this.boxListsService.removeBox(id);
   }
 
 

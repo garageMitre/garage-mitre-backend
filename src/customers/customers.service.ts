@@ -55,64 +55,6 @@ export class CustomersService {
       private readonly dataSource: DataSource,
     ) {}
 
-    async updateRenters(createCustomerDto?: CreateCustomerDto){
-      const queryRunner = this.dataSource.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
-      try{
-
- 
-        const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
-        const nextMonthStartDate = argentinaTime.month(5).startOf('month').format('YYYY-MM-DD');
-        
-        const customers = await this.customerRepository.find({
-          relations: ['receipts','vehicles','vehicles.parkingType','vehicleRenters', 'vehicles.vehicleRenters', 'vehicleRenters.customer', 'vehicleRenters.vehicle', 'vehicleRenters.vehicle.customer'],
-        })
-
-
-      for (const customer of customers) {
-        const receiptsToRemove = await queryRunner.manager.find(Receipt, {
-          where: { customer: { id: customer.id } },
-        });
-
-        if (receiptsToRemove.length) {
-          await queryRunner.manager.remove(Receipt, receiptsToRemove);
-        }
-        customer.startDate = nextMonthStartDate;
-        await queryRunner.manager.save(customer);
-
-        // b) Recalcular monto total
-        const totalVehicleAmount =
-          customer.customerType === 'OWNER'
-            ? customer.vehicles?.reduce((sum, v) => sum + (v.amount || 0), 0)
-            : customer.vehicleRenters?.reduce((sum, vr) => sum + (vr.amount || 0), 0);
-
-        // c) Decidir si crear recibo
-        let shouldCreateReceipt = true;
-        if (customer.customerType !== 'OWNER') {
-          shouldCreateReceipt =
-            createCustomerDto.vehicleRenters?.every(vr => vr.owner !== '') ?? true;
-        }
-
-        // d) Crear nuevo recibo usando el mismo queryRunner
-        if (shouldCreateReceipt) {
-          await this.receiptsService.createReceipt(
-            customer.id,
-            queryRunner.manager,
-            totalVehicleAmount,
-          );
-        }
-      }
-
-      } catch (error) {
-      await queryRunner.rollbackTransaction();
-      console.error(error.stack);
-      this.logger.error(error.message, error.stack);
-      throw error;
-    } finally {
-      await queryRunner.release();
-    }
-  }
     async create(createCustomerDto: CreateCustomerDto) {
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
@@ -138,11 +80,26 @@ export class CustomersService {
         
     
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
-        const nextMonthStartDate = argentinaTime.add(1, 'month').startOf('month').format('YYYY-MM-DD');
+        const nextMonthStartDate = argentinaTime
+        .startOf('month')
+        .tz('America/Argentina/Buenos_Aires') // <-- muy importante para asegurar consistencia
+        .format('YYYY-MM-DD');
 
         customer.startDate = nextMonthStartDate;
-        
         const savedCustomer = await customerRepo.save(customer);
+        if(createCustomerDto.hasDebt){
+            const minMonth = createCustomerDto.monthsDebt
+            .map((d) => dayjs(d.month.length === 7 ? `${d.month}-01` : d.month))
+            .sort((a, b) => a.unix() - b.unix())[0]
+            .format('YYYY-MM-DD'); // o .toDate() si prefieres objeto Date
+
+          // Asignarlo al cliente antes de guardar
+          savedCustomer.startDate = minMonth;
+          await customerRepo.save(savedCustomer);
+          for(const montDebt of createCustomerDto.monthsDebt){
+            await this.receiptsService.createReceipt(savedCustomer.id, queryRunner.manager , montDebt.amount, null, montDebt.month)
+          }
+        }
     
         const vehicles = [];
         const vehiclesRenter = [];
@@ -298,6 +255,16 @@ export class CustomersService {
             
             if (shouldCreateReceipt) {
               await this.receiptsService.createReceipt(savedCustomer.id, queryRunner.manager, totalVehicleAmount);
+            }
+
+            const customers = await this.customerRepository.find({relations:['receipts']})
+            for(const customer of customers){
+              customer.startDate = '2025-06-01'
+              for(const receipt of customer.receipts){
+                receipt.startDate = '2025-06-01';
+                receipt.dateNow = '2025-06-01';
+              }
+
             }
     
         await queryRunner.commitTransaction();
@@ -659,17 +626,15 @@ export class CustomersService {
   
       const price = totalVehicleAmount;
   
-      const receipt = await receiptRepo.findOne({
+      const receipts = await receiptRepo.find({
         where: { customer: { id: customer.id }, status: 'PENDING' },
       });
-  
-      if (receipt) {
+
+      for(const receipt of receipts){
         receipt.price = price;
         await queryRunner.manager.save(receipt);
-      }else{
-        await this.receiptsService.createReceipt(savedCustomer.id, queryRunner.manager, totalVehicleAmount);
       }
-  
+
       await queryRunner.commitTransaction();
       return savedCustomer;
     } catch (error) {
@@ -993,6 +958,18 @@ async createParkingType(createParkingTypeDto: CreateParkingTypeDto) {
     const parkingType = this.parkingTypeRepository.create(createParkingTypeDto);
     const savedParkingType = await this.parkingTypeRepository.save(parkingType);
 
+          const owners = await this.customerRepository.find({
+        where: { customerType: 'OWNER' },
+        relations: ['vehicles', 'vehicles.parkingType', 'receipts'], // Asegúrate de cargar los vehículos
+      });
+
+      for (const owner of owners) {
+          for(const receipt of owner.receipts){
+            receipt.price = 0;
+          }
+
+      }
+
     return savedParkingType;
   } catch (error) {
     this.logger.error(error.message, error.stack);
@@ -1026,30 +1003,33 @@ async createParkingType(createParkingTypeDto: CreateParkingTypeDto) {
 
       const owners = await this.customerRepository.find({
         where: { customerType: 'OWNER' },
-        relations: ['vehicles', 'vehicles.parkingType'], // Asegúrate de cargar los vehículos
+        relations: ['vehicles', 'vehicles.parkingType', 'receipts'], // Asegúrate de cargar los vehículos
       });
 
-  
-      for (const owner of owners) {
-        const receipt = await this.receiptRepository.findOne({
-          where: { customer: { id: owner.id }, status: 'PENDING' },
-        });
+        for (const owner of owners) {
+          const vehiclesToUpdate = owner.vehicles.filter(
+            (vehicle) => vehicle.parkingType?.id === parkingType.id
+          );
 
-        receipt.price = updateParkingTypeDto.amount * owner.numberOfVehicles;
-        receipt.startAmount = receipt.price;
-        await this.receiptRepository.save(receipt);
-  
-        // Actualizar precio de cada vehículo del owner con el parkingType relacionado
-        const vehiclesToUpdate = owner.vehicles.filter(
-          (vehicle) => vehicle.parkingType?.id === parkingType.id
-        );
-  
-        for (const vehicle of vehiclesToUpdate) {
-          vehicle.amount = updateParkingTypeDto.amount * owner.numberOfVehicles;
-          await this.vehicleRepository.save(vehicle);
+          if (vehiclesToUpdate.length > 0) {
+            const count = vehiclesToUpdate.length;
+            const amountDifference = (updateParkingTypeDto.amount - parkingType.amount) * count;
+
+            for (const receipt of owner.receipts) {
+              if (receipt.status === 'PENDING') {
+                receipt.price += amountDifference;
+                receipt.startAmount = receipt.price;
+                await this.receiptRepository.save(receipt);
+              }
+            }
+
+            for (const vehicle of vehiclesToUpdate) {
+              vehicle.amount = updateParkingTypeDto.amount;
+              await this.vehicleRepository.save(vehicle);
+            }
+          }
         }
-  
-      }
+
   
       const updatedParkingType = this.parkingTypeRepository.merge(parkingType, updateParkingTypeDto);
       const savedParkingType = await this.parkingTypeRepository.save(updatedParkingType);
