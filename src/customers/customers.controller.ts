@@ -19,7 +19,7 @@ export class CustomersController {
 
   @Post()
   create(@Body() createCustomerDto?: CreateCustomerDto) {
-    return this.customersService.create(createCustomerDto);
+    return this.customersService.deleteReceipt(createCustomerDto);
   }
 
   @Get('customer/:customerType')

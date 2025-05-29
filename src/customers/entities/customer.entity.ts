@@ -53,6 +53,12 @@ export type CustomerType = (typeof CUSTOMER_TYPE)[number];
     @Column('bool', { nullable:true, default:false })
     hasDebt: boolean;
 
+    @Column({ type: 'jsonb', nullable: true })
+    monthsDebt?: {
+      month: string;
+      amount: number;
+    }[];
+
     @OneToMany(() => Vehicle, (vehicle) => vehicle.customer, { cascade: true})
     vehicles: Vehicle[];
 

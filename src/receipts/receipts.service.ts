@@ -33,6 +33,7 @@ export class ReceiptsService {
 
 async createReceipt(customerId: string, manager: EntityManager, price?: number, dateNow?: string, dateNowForDebt?: string): Promise<Receipt> {
   try {
+
     const customer = await manager.findOne(Customer, {
       where: { id: customerId },
       relations: ['vehicles', 'vehicleRenters', 'receipts'],
@@ -40,6 +41,13 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
 
     if (!customer) {
       throw new NotFoundException('Customer not found');
+    }
+    const actualStartDate = dateNow ?? dateNowForDebt ?? customer.startDate;
+
+    const receiptDuplicate = await this.receiptRepository.find({where:{customer:customer, startDate: actualStartDate}})
+
+   if (receiptDuplicate.length > 0) {
+      throw new ConflictException('Receipt already exists');
     }
 
     const length = Math.random() < 0.5 ? 11 : 15;
@@ -58,12 +66,13 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
     }
 
     // ÚLTIMO NÚMERO PARA ESTE receiptTypeKey
-    const lastReceipt = await manager
-      .createQueryBuilder(Receipt, 'receipt')
-      .where('receipt.receiptTypeKey = :type', { type: receiptTypeKey })
-      .andWhere('receipt.receiptNumber IS NOT NULL')
-      .orderBy('receipt.createdAt', 'DESC')
-      .getOne();
+      const lastReceipt = await manager
+        .createQueryBuilder(Receipt, 'receipt')
+        .setLock('pessimistic_write') // <-- esto evita que otras instancias lean al mismo tiempo
+        .where('receipt.receiptTypeKey = :type', { type: receiptTypeKey })
+        .andWhere('receipt.receiptNumber IS NOT NULL')
+        .orderBy('receipt.receiptNumber', 'DESC')
+        .getOne();
 
     // ULTIMO RECIBO DEL CLIENTE
     const lastReceiptCustomer = await manager.findOne(Receipt, {
@@ -88,11 +97,12 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
       customer,
       price,
       startAmount: price,
-      dateNow: dateNow || dateNowForDebt || nextMonthStartDate,
-      startDate: dateNow || dateNowForDebt || nextMonthStartDate,
+      dateNow: actualStartDate,
+      startDate: actualStartDate,
       barcode,
       receiptTypeKey,
     });
+
 
     // GENERAR receiptNumber
     if (lastReceipt && lastReceipt.receiptNumber) {

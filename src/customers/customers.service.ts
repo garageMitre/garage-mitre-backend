@@ -55,6 +55,40 @@ export class CustomersService {
       private readonly dataSource: DataSource,
     ) {}
 
+    async deleteReceipt(createCustomerDto: CreateCustomerDto){
+            const queryRunner = this.dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+    try{
+    const customers = await this.customerRepository.find({where:{customerType:'RENTER'}, relations: ['receipts', 'vehicleRenters'],})
+
+    for(const customer of customers){
+      await this.receiptRepository.remove(customer.receipts)
+              const totalVehicleAmount =
+          customer.customerType === 'OWNER'
+            ? customer.vehicles.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0)
+            : customer.vehicleRenters.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0);
+    
+            let shouldCreateReceipt = true;
+
+            if (shouldCreateReceipt) {
+              await this.receiptsService.createReceipt(customer.id, queryRunner.manager, totalVehicleAmount);
+            }
+    }
+         await queryRunner.commitTransaction();
+         return customers
+
+      } catch (error) {
+        await queryRunner.rollbackTransaction();
+        console.error(error.stack);
+        this.logger.error(error.message, error.stack);
+        throw error;
+      } finally {
+        await queryRunner.release();
+      }
+
+    }
+
     async create(createCustomerDto: CreateCustomerDto) {
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
@@ -77,6 +111,26 @@ export class CustomersService {
           'NIDIA_ROSA_MARIA_FONTELA',
           'ALDO_RAUL_FONTELA',
         ];
+
+       const customers = await this.customerRepository.find({where:{customerType:'RENTER'}, relations: ['receipts', 'vehicles', 'vehicleRenters'],})
+
+    for(const customer of customers){
+              const totalVehicleAmount =
+          customer.customerType === 'OWNER'
+            ? customer.vehicles.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0)
+            : customer.vehicleRenters.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0);
+    
+            let shouldCreateReceipt = true;
+
+            if (customer.customerType !== 'OWNER') {
+              // Si es RENTER, verificar si alguno de los vehicleRenters tiene owner vacío
+              shouldCreateReceipt = createCustomerDto.vehicleRenters?.every(vr => vr.owner !== '');
+            }
+            
+            if (shouldCreateReceipt) {
+              await this.receiptsService.createReceipt(customer.id, queryRunner.manager, totalVehicleAmount);
+            }
+    }
         
     
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
@@ -317,6 +371,11 @@ export class CustomersService {
     await queryRunner.startTransaction();
   
     try {
+          const customers = await this.customerRepository.find({where:{customerType:'RENTER'}, relations: ['receipts', 'vehicles', 'vehicleRenters', 'vehicleRenters.vehicle'],})
+
+    for(const customer of customers){
+      await this.receiptRepository.remove(customer.receipts)
+    }
       const customerRepo = queryRunner.manager.getRepository(Customer);
       const vehicleRepo = queryRunner.manager.getRepository(Vehicle);
       const vehicleRenterRepo = queryRunner.manager.getRepository(VehicleRenter);
@@ -331,6 +390,28 @@ export class CustomersService {
       if (!customer) {
         throw new NotFoundException(`Customer ${id} not found`);
       }
+      if(updateCustomerDto.hasDebt){
+
+         const minMonth = updateCustomerDto.monthsDebt
+          .map((d) => dayjs(d.month.length === 7 ? `${d.month}-01` : d.month))
+          .sort((a, b) => a.unix() - b.unix())[0]
+          .format('YYYY-MM-DD'); // o .toDate() si prefieres objeto Date
+
+        customer.startDate = minMonth;
+
+        if(customer.hasDebt){
+          for(const montDebt of customer.monthsDebt){
+            const receipt = await this.receiptRepository.findOne({where:{customer:customer, startDate:montDebt.month}})
+            await this.receiptRepository.remove(receipt);
+          }
+        }
+         for(const montDebt of updateCustomerDto.monthsDebt){
+          await this.receiptsService.createReceipt(customer.id, queryRunner.manager , montDebt.amount, null, montDebt.month)
+        }
+
+      }
+      
+    
 
       const manualOwners = [
         'JOSE_RICARDO_AZNAR',
