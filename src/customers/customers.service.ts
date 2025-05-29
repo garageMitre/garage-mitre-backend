@@ -55,40 +55,6 @@ export class CustomersService {
       private readonly dataSource: DataSource,
     ) {}
 
-    async deleteReceipt(createCustomerDto: CreateCustomerDto){
-            const queryRunner = this.dataSource.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
-    try{
-    const customers = await this.customerRepository.find({where:{customerType:'RENTER'}, relations: ['receipts', 'vehicleRenters'],})
-
-    for(const customer of customers){
-      await this.receiptRepository.remove(customer.receipts)
-              const totalVehicleAmount =
-          customer.customerType === 'OWNER'
-            ? customer.vehicles.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0)
-            : customer.vehicleRenters.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0);
-    
-            let shouldCreateReceipt = true;
-
-            if (shouldCreateReceipt) {
-              await this.receiptsService.createReceipt(customer.id, queryRunner.manager, totalVehicleAmount);
-            }
-    }
-         await queryRunner.commitTransaction();
-         return customers
-
-      } catch (error) {
-        await queryRunner.rollbackTransaction();
-        console.error(error.stack);
-        this.logger.error(error.message, error.stack);
-        throw error;
-      } finally {
-        await queryRunner.release();
-      }
-
-    }
-
     async create(createCustomerDto: CreateCustomerDto) {
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
@@ -351,11 +317,6 @@ export class CustomersService {
     await queryRunner.startTransaction();
   
     try {
-          const customers = await this.customerRepository.find({where:{customerType:'RENTER'}, relations: ['receipts', 'vehicles', 'vehicleRenters', 'vehicleRenters.vehicle'],})
-
-    for(const customer of customers){
-      await this.receiptRepository.remove(customer.receipts)
-    }
       const customerRepo = queryRunner.manager.getRepository(Customer);
       const vehicleRepo = queryRunner.manager.getRepository(Vehicle);
       const vehicleRenterRepo = queryRunner.manager.getRepository(VehicleRenter);
