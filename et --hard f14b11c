@@ -1,0 +1,76 @@
+[33md01b2fb[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m fix: customer
+[33m96ad79a[m fix: update customer
+[33me932ec3[m fix: renters
+[33m88cea88[m fix: receipt renter
+[33mf14b11c[m fix: customer
+[33m5c0d671[m fix: starDate
+[33mc638a4f[m fix: startDate customer
+[33m93a0e2b[m fix: date receipt
+[33m9efd94b[m fix: receipt date
+[33md15448a[m fix: date receipt
+[33m42c5361[m fix: price parking type
+[33m2fcc44f[m feat: crud expense
+[33mb3b7937[m feat: vehicle type for ticket day
+[33mdc5b2ec[m fix: receipt number owner
+[33m384fe3e[m fix: receiptNumbers owners
+[33m77f5aed[m feat: delete ticket registration
+[33m3ed8d5c[m fix: update
+[33m1589bbe[m Merge pull request #8 from garageMitre/fix/receipts
+[33m53b9536[m[33m ([m[1;31morigin/fix/receipts[m[33m, [m[1;32mfix/receipts[m[33m)[m fix: receipt date
+[33m90db8c1[m Merge pull request #7 from garageMitre/fix/receipts
+[33m9d895d2[m fix: tickets for days o weeks
+[33m7b8d39a[m Merge pull request #6 from garageMitre/fix/receipts
+[33m67e43e0[m fix: box list
+[33m563ac21[m Merge pull request #5 from garageMitre/fix/receipts
+[33m828009e[m fix: update amount customers
+[33m6f55018[m Merge pull request #4 from garageMitre/fix/receipts
+[33mabd5c62[m feat: scanner receipt
+[33m522f162[m Merge pull request #3 from garageMitre/fix/receipts
+[33m83110fe[m fix: receipt
+[33m4723fbc[m Merge pull request #2 from garageMitre/feat/notifications-interest
+[33m8b6572f[m[33m ([m[1;31morigin/feat/notifications-interest[m[33m)[m feat: add update for register customers
+[33m1366f95[m feat: add owner type in create renter
+[33mf121585[m Merge pull request #1 from garageMitre/feat/notifications-interest
+[33m823ea92[m fix: date tickets
+[33m461114a[m feat: add notification interest
+[33m9c595a8[m feat: soft delete customers
+[33mc833a50[m fix: create customers
+[33m2badbcb[m fix: start date customer
+[33me5fa37e[m fix cron
+[33m3613171[m feat: cron
+[33m57efb3d[m feat: cron
+[33mb171725[m fix: receipt
+[33m2661a2e[m fix: receipts
+[33m35d6222[m fix: receipt dates
+[33m1199585[m fix: customers pagination
+[33m0dcca87[m fix: tickets time
+[33mbbeac0e[m fix: time for notes
+[33mca8e6d2[m fix: note alert
+[33m67ac830[m fix: customers
+[33md9c44e0[m feat: add private parking
+[33m3ec1535[m fix: remove automatic print
+[33m1962ad9[m fix: printer
+[33m6e47219[m fix: add local service for print
+[33mb67d16b[m fix: delete docker file
+[33m6b80d13[m fix: docker
+[33mfecbf18[m feat: add Dockerfile with cups
+[33m5e62680[m fix: printer
+[33m2d67990[m fix: logs
+[33mdb0407a[m fix: nest schedule version
+[33m5c872f6[m Forzar redeploy en Railway
+[33mf8310c1[m Forzar redeploy en Railway
+[33mbb3146a[m fix: remove images
+[33m43c0201[m Forzar redeploy en Railway
+[33m2d20b7e[m Forzar redeploy en Railway
+[33m2acfd39[m Force Railway Deployment
+[33ma06f12d[m feat: aurh
+[33mdc4c70c[m feat: receipts
+[33m70f0165[m feat: add properties in renters and owners
+[33m545e9cd[m Merge pull request #2 from IgnacioGaute/feat/scanner-register
+[33m72ce804[m feat: scanner register
+[33m70c447c[m feat: add entities and relations with scanner
+[33m7221c44[m feat: initialize project
+[33m1a5d7fc[m feat: initialize project
+[33mb78ac42[m feat: initialize project
+[33m9e6b22e[m README.md
+[33m8ce842c[m Initial commit
