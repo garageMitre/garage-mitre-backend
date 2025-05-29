@@ -370,26 +370,26 @@ export class CustomersService {
       if (!customer) {
         throw new NotFoundException(`Customer ${id} not found`);
       }
-      if(updateCustomerDto.hasDebt){
+      // if(updateCustomerDto.hasDebt){
 
-         const minMonth = updateCustomerDto.monthsDebt
-          .map((d) => dayjs(d.month.length === 7 ? `${d.month}-01` : d.month))
-          .sort((a, b) => a.unix() - b.unix())[0]
-          .format('YYYY-MM-DD'); // o .toDate() si prefieres objeto Date
+      //    const minMonth = updateCustomerDto.monthsDebt
+      //     .map((d) => dayjs(d.month.length === 7 ? `${d.month}-01` : d.month))
+      //     .sort((a, b) => a.unix() - b.unix())[0]
+      //     .format('YYYY-MM-DD'); // o .toDate() si prefieres objeto Date
 
-        customer.startDate = minMonth;
+      //   customer.startDate = minMonth;
 
-        if(customer.hasDebt){
-          for(const montDebt of customer.monthsDebt){
-            const receipt = await this.receiptRepository.findOne({where:{customer:customer, startDate:montDebt.month}})
-            await this.receiptRepository.remove(receipt);
-          }
-        }
-         for(const montDebt of updateCustomerDto.monthsDebt){
-          await this.receiptsService.createReceipt(customer.id, queryRunner.manager , montDebt.amount, null, montDebt.month)
-        }
+      //   if(customer.hasDebt){
+      //     for(const montDebt of customer.monthsDebt){
+      //       const receipt = await this.receiptRepository.findOne({where:{customer:customer, startDate:montDebt.month}})
+      //       await this.receiptRepository.remove(receipt);
+      //     }
+      //   }
+      //    for(const montDebt of updateCustomerDto.monthsDebt){
+      //     await this.receiptsService.createReceipt(customer.id, queryRunner.manager , montDebt.amount, null, montDebt.month)
+      //   }
 
-      }
+      // }
       
     
 
