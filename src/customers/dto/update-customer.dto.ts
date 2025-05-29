@@ -75,6 +75,17 @@ export class UpdateCustomerDto {
   @IsEnum(CUSTOMER_TYPE)
   customerType: CustomerType;
 
+  @IsBoolean()
+  @IsOptional()
+  hasDebt: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => MonthDebtDto)
+  monthsDebt?: MonthDebtDto[];
+  
+
   @IsArray()
   @ValidateNested({ each: true }) // Validar cada vehículo individualmente
   @Type(() => CreateVehicleDto)
@@ -86,5 +97,13 @@ export class UpdateCustomerDto {
   @Type(() => CreateVehicleRenterDto)
   @IsOptional() // Transformar a la clase `CreateVehicleDto`
   vehicleRenters?: CreateVehicleRenterDto[]; 
+}
+
+class MonthDebtDto {
+  @IsString()
+  month: string; // Formato esperado: 'YYYY-MM'
+
+  @IsNumber()
+  amount: number; // Monto de la deuda para ese mes
 }
 

@@ -1,0 +1,5 @@
+[nixpacks]
+language = "node"
+
+[phases.setup]
+nixPkgs = ["libnss3", "libatk", "libatk-bridge", "libcups", "libgbm", "libasound2", "libxss", "libgtk3", "libxshmfence", "glu", "chromium"]
