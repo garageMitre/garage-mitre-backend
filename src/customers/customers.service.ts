@@ -112,26 +112,6 @@ export class CustomersService {
           'ALDO_RAUL_FONTELA',
         ];
 
-       const customers = await this.customerRepository.find({where:{customerType:'RENTER'}, relations: ['receipts', 'vehicles', 'vehicleRenters'],})
-
-    for(const customer of customers){
-              const totalVehicleAmount =
-          customer.customerType === 'OWNER'
-            ? customer.vehicles.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0)
-            : customer.vehicleRenters.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0);
-    
-            let shouldCreateReceipt = true;
-
-            if (customer.customerType !== 'OWNER') {
-              // Si es RENTER, verificar si alguno de los vehicleRenters tiene owner vacío
-              shouldCreateReceipt = createCustomerDto.vehicleRenters?.every(vr => vr.owner !== '');
-            }
-            
-            if (shouldCreateReceipt) {
-              await this.receiptsService.createReceipt(customer.id, queryRunner.manager, totalVehicleAmount);
-            }
-    }
-        
     
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
         const nextMonthStartDate = argentinaTime
