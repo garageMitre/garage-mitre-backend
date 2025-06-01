@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Not, Repository } from 'typeorm';
+import { DataSource, EntityManager, MoreThan, Not, Repository } from 'typeorm';
 import { BoxListsService } from 'src/box-lists/box-lists.service';
 import { BoxList } from 'src/box-lists/entities/box-list.entity';
 import { addMonths, startOfMonth } from 'date-fns';
@@ -42,17 +42,17 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
     if (!customer) {
       throw new NotFoundException('Customer not found');
     }
-    const actualStartDate = dateNow ?? dateNowForDebt ?? customer.startDate;
+    const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
+    const nextMonthStartDate = argentinaTime
+    .startOf('month')
+    .add(1, 'day') 
+    .tz('America/Argentina/Buenos_Aires')
+    .format('YYYY-MM-DD');
+    const actualStartDate = dateNow ?? dateNowForDebt ?? nextMonthStartDate;
 
-    const receiptDuplicate = await this.receiptRepository.find({where:{customer:customer, startDate: actualStartDate}})
-
-   if (receiptDuplicate.length > 0) {
-      throw new ConflictException('Receipt already exists');
-    }
 
     const length = Math.random() < 0.5 ? 11 : 15;
     const barcode = Array.from({ length }, () => Math.floor(Math.random() * 10)).join('');
-    const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
 
     // TIPO DE RECIBO
     let receiptTypeKey = 'OWNER';
@@ -74,28 +74,10 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
         .orderBy('receipt.receiptNumber', 'DESC')
         .getOne();
 
-    // ULTIMO RECIBO DEL CLIENTE
-    const lastReceiptCustomer = await manager.findOne(Receipt, {
-      where: {
-        customer: { id: customer.id },
-        status: 'PENDING',
-      },
-      order: { createdAt: 'DESC' },
-    });
-    //PONER EL CUSTOMER.STARDATE COMO MES ACTUAL, Y QUE EN EL FRONT NO PERMITA PONER COMO DEUDA EL MES ACTUAL Y ASI ESTA 
-
-    const baseStartDate = lastReceiptCustomer?.startDate ?? customer.startDate;
-    const newStartDate = lastReceiptCustomer ? dayjs(baseStartDate).add(1, 'month').format('YYYY-MM-DD') : customer.startDate;
-
-    const nextMonthStartDate = argentinaTime
-    .startOf('month')
-    .tz('America/Argentina/Buenos_Aires') // <-- muy importante para asegurar consistencia
-    .format('YYYY-MM-DD');
-
-    // CREAR RECIBO
+        
     const receipt = manager.create(Receipt, {
       customer,
-      price,
+      price : price,
       startAmount: price,
       dateNow: actualStartDate,
       startDate: actualStartDate,
@@ -154,7 +136,19 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
         
     
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
-        const hasPaid = customer.startDate ? argentinaTime.isBefore(dayjs(customer.startDate)) : false;
+        const dataNow = argentinaTime
+        .startOf('month')
+        .add(1, 'day') 
+        .tz('America/Argentina/Buenos_Aires')
+        .format('YYYY-MM-DD');
+        const hasPaid = customer.startDate
+        ? dayjs(dataNow).isBefore(dayjs(customer.startDate))
+        : false;
+
+
+        console.log('NOW', dataNow)
+        console.log('CUSTOMER.STARTDATE', customer.startDate)
+
     
         if (hasPaid) {
           throw new NotFoundException({
@@ -162,13 +156,40 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
             message: 'This bill was already paid this month.',
           });
         }
-        const receiptStartDate = dayjs(receipt.startDate).tz('America/Argentina/Buenos_Aires');
+// 1) Buscar el recibo PENDING con el dateNow más alto (el más cercano a hoy)
+      const closestPendingReceipt = await queryRunner.manager.findOne(Receipt, {
+        where: {
+          customer: { id: customer.id },
+          status: 'PENDING',
+          startDate: MoreThan(receipt.startDate), // ← recibos después del actual
+        },
+        order: { startDate: 'ASC' }, // ← el más próximo que sigue
+      });
 
-        // Sumar un mes al receipt.startDate y obtener el primer día del mes siguiente
-        const nextMonthStartDate = receiptStartDate.add(1, 'month').startOf('month').format('YYYY-MM-DD');
 
-        customer.previusStartDate = customer.startDate;
-        customer.startDate = nextMonthStartDate;
+          // 2) Obtener la fecha base para calcular el próximo mes
+          let baseDate: dayjs.Dayjs;
+          if (closestPendingReceipt) {
+            // Si encontramos un recibo pendiente, partimos de su startDate
+            baseDate = dayjs(closestPendingReceipt.startDate).tz('America/Argentina/Buenos_Aires');
+          } else {
+            // Si no hay recibos pendientes, partimos de hoy
+            baseDate = dayjs().add(1, 'month').tz('America/Argentina/Buenos_Aires');
+          }
+
+          // 3) Calcular el primer día del mes siguiente a baseDate
+          const nextMonthStartDate = baseDate.startOf('month').add(1, 'day').format('YYYY-MM-DD');
+          const prevMonthStartDate = baseDate
+          .subtract(1, 'month')
+          .add(1, 'day') 
+          .format('YYYY-MM-DD');
+
+
+          // 4) Guardar en customer
+          customer.previusStartDate = prevMonthStartDate;
+          customer.startDate = nextMonthStartDate;
+
+
     
         await queryRunner.manager.save(Customer, customer);
     
@@ -233,19 +254,9 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
           throw new NotFoundException('Customer not found');
         }
     
-        customer.startDate = dayjs(customer.startDate)
-        .subtract(1, 'month')
-        .format('YYYY-MM-DD');
-        
-        if (!customer.startDate) {
-          throw new BadRequestException('startDate is required to calculate previousStartDate');
-        }
-        
-        customer.previusStartDate = dayjs(customer.startDate)
-          .subtract(1, 'month')
-          .format('YYYY-MM-DD');
+
     
-        await customerRepo.save(customer);
+        
     
         const receipts = customer.receipts.sort(
           (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
@@ -261,9 +272,21 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
             dateNow: 'DESC',
           },
         });
-        console.log(lastPaidReceipt)
+        customer.startDate = dayjs(lastPaidReceipt.startDate)
+        .add(1, 'day') 
+        .format('YYYY-MM-DD');
+        
+        if (!customer.startDate) {
+          throw new BadRequestException('startDate is required to calculate previousStartDate');
+        }
+        
+        customer.previusStartDate = dayjs(lastPaidReceipt.startDate)
+          .subtract(1, 'month')
+          .add(1, 'day') 
+          .format('YYYY-MM-DD');
 
-    
+        await customerRepo.save(customer);
+
         if (!lastPaidReceipt) {
           throw new NotFoundException({
             code: 'RECEIPT_PAID_NOT_FOUND',

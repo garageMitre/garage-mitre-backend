@@ -82,25 +82,53 @@ export class CustomersService {
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
         const nextMonthStartDate = argentinaTime
         .startOf('month')
-        .tz('America/Argentina/Buenos_Aires') // <-- muy importante para asegurar consistencia
+        .add(1, 'day') 
+        .tz('America/Argentina/Buenos_Aires')
         .format('YYYY-MM-DD');
 
         customer.startDate = nextMonthStartDate;
         const savedCustomer = await customerRepo.save(customer);
-        if(createCustomerDto.hasDebt){
-            const minMonth = createCustomerDto.monthsDebt
-            .map((d) => dayjs(d.month.length === 7 ? `${d.month}-01` : d.month))
-            .sort((a, b) => a.unix() - b.unix())[0]
-            .format('YYYY-MM-DD'); // o .toDate() si prefieres objeto Date
+          if (createCustomerDto.hasDebt) {
+            let parsedMonthsDebt: { month: string; amount?: number }[];
 
-          // Asignarlo al cliente antes de guardar
-          savedCustomer.startDate = minMonth;
-          await customerRepo.save(savedCustomer);
-          for(const montDebt of createCustomerDto.monthsDebt){
-            await this.receiptsService.createReceipt(savedCustomer.id, queryRunner.manager , montDebt.amount, null, montDebt.month)
+            try {
+              parsedMonthsDebt = Array.isArray(createCustomerDto.monthsDebt)
+                ? createCustomerDto.monthsDebt
+                : JSON.parse(createCustomerDto.monthsDebt);
+            } catch (err) {
+              throw new BadRequestException('Formato inválido para monthsDebt');
+            }
+
+            // Validar formato de cada elemento
+            for (const d of parsedMonthsDebt) {
+              if (!d.month || typeof d.month !== 'string') {
+                throw new BadRequestException('Cada elemento en monthsDebt debe tener un mes válido');
+              }
+            }
+
+            const minMonth = parsedMonthsDebt
+              .map((d) => dayjs(d.month.length === 7 ? `${d.month}-01` : d.month))
+              .sort((a, b) => a.unix() - b.unix())[0]
+              .format('YYYY-MM-DD');
+
+            savedCustomer.startDate = minMonth;
+            savedCustomer.monthsDebt = parsedMonthsDebt;
+
+            await queryRunner.manager.save(savedCustomer);
+
+            for (const debt of parsedMonthsDebt) {
+
+              await this.receiptsService.createReceipt(
+                savedCustomer.id,
+                queryRunner.manager,
+                debt.amount,
+                null,
+                debt.month.length === 7 ? `${debt.month}-01` : debt.month,
+              );
+            }
           }
-        }
-    
+
+
         const vehicles = [];
         const vehiclesRenter = [];
     
@@ -311,12 +339,14 @@ export class CustomersService {
       throw error;
     }
   }
+  
   async update(id: string, updateCustomerDto: UpdateCustomerDto) {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
   
     try {
+      
       const customerRepo = queryRunner.manager.getRepository(Customer);
       const vehicleRepo = queryRunner.manager.getRepository(Vehicle);
       const vehicleRenterRepo = queryRunner.manager.getRepository(VehicleRenter);
@@ -331,27 +361,6 @@ export class CustomersService {
       if (!customer) {
         throw new NotFoundException(`Customer ${id} not found`);
       }
-      // if(updateCustomerDto.hasDebt){
-
-      //    const minMonth = updateCustomerDto.monthsDebt
-      //     .map((d) => dayjs(d.month.length === 7 ? `${d.month}-01` : d.month))
-      //     .sort((a, b) => a.unix() - b.unix())[0]
-      //     .format('YYYY-MM-DD'); // o .toDate() si prefieres objeto Date
-
-      //   customer.startDate = minMonth;
-
-      //   if(customer.hasDebt){
-      //     for(const montDebt of customer.monthsDebt){
-      //       const receipt = await this.receiptRepository.findOne({where:{customer:customer, startDate:montDebt.month}})
-      //       await this.receiptRepository.remove(receipt);
-      //     }
-      //   }
-      //    for(const montDebt of updateCustomerDto.monthsDebt){
-      //     await this.receiptsService.createReceipt(customer.id, queryRunner.manager , montDebt.amount, null, montDebt.month)
-      //   }
-
-      // }
-      
     
 
       const manualOwners = [
@@ -627,9 +636,7 @@ export class CustomersService {
       }
   
       // Actualizar Customer
-      const { vehicles, vehicleRenters, ...customerData } = updateCustomerDto;
-      customerRepo.merge(customer, customerData);
-      const savedCustomer = await queryRunner.manager.save(customer);
+
   
       // Actualizar recibo si está pendiente
       const totalVehicleAmount = customer.vehicles?.length
@@ -637,6 +644,10 @@ export class CustomersService {
         : customer.vehicleRenters.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0);
   
       const price = totalVehicleAmount;
+      const oldMonthsDebtCustoemr = customer.monthsDebt;
+      const { vehicles, vehicleRenters, ...customerData } = updateCustomerDto;
+      customerRepo.merge(customer, customerData);
+      const savedCustomer = await queryRunner.manager.save(customer);
   
       const receipts = await receiptRepo.find({
         where: { customer: { id: customer.id }, status: 'PENDING' },
@@ -646,6 +657,86 @@ export class CustomersService {
         receipt.price = price;
         await queryRunner.manager.save(receipt);
       }
+
+      if (updateCustomerDto.hasDebt) {
+        const normalizeMonth = (month: string) =>
+          month.length === 7 ? `${month}-01` : month;
+        const prevMonths = (oldMonthsDebtCustoemr || []).map(m =>
+          normalizeMonth(m.month)
+        );
+
+        const newMonthsDebt = Array.isArray(updateCustomerDto.monthsDebt)
+          ? updateCustomerDto.monthsDebt
+          : JSON.parse(updateCustomerDto.monthsDebt);
+
+        const dtoMonths = newMonthsDebt.map(m => normalizeMonth(m.month));
+        const dtoMonthsSet = new Set(dtoMonths);
+
+        const receiptRepoTxn = queryRunner.manager.getRepository(Receipt);
+
+        // for (const prevMonth of prevMonths) {
+        //   if (!dtoMonthsSet.has(prevMonth)) {
+        //     console.log(`🗑 Intentando eliminar recibo con startDate="${prevMonth}"`);
+        //     // Encontrá el recibo EXACTO a eliminar (solo PENDING, opcional)
+        //     const receiptToDelete = await receiptRepoTxn.findOne({
+        //       where: {
+        //         customer: { id: customer.id },
+        //         startDate: prevMonth,
+        //         status: 'PENDING',
+        //       },
+        //     });
+
+        //     if (receiptToDelete) {
+        //       // Lo removemos con el repositorio transaccional
+        //       await receiptRepoTxn.remove(receiptToDelete);
+        //       console.log(`✅ Recibo eliminado del mes: ${prevMonth}`);
+        //     } else {
+        //       console.warn(`⚠️ No se encontró recibo con startDate="${prevMonth}"`);
+        //     }
+        //   }
+        // }
+
+        const formatMonth = (m: string) =>
+          dayjs(m.length === 7 ? `${m}-01` : m).format('YYYY-MM-DD');
+
+        const minMonth = newMonthsDebt
+          .map(d => dayjs(formatMonth(d.month)))
+          .sort((a, b) => a.unix() - b.unix())[0]
+          .format('YYYY-MM-DD');
+
+        customer.startDate = minMonth;
+        customer.monthsDebt = newMonthsDebt;
+        await queryRunner.manager.save(customer);
+
+        for (const monthDebt of newMonthsDebt) {
+          const formattedMonth = formatMonth(monthDebt.month);
+          const incomingAmount = Number(monthDebt.amount ?? 0);
+
+          const existing = await receiptRepoTxn.findOne({
+            where: {
+              customer: { id: customer.id },
+              startDate: formattedMonth,
+            },
+          });
+
+          if (existing) {
+            if (existing.price !== incomingAmount) {
+              existing.price = incomingAmount;
+              await receiptRepoTxn.save(existing);
+              console.log('Recibo actualizado:', existing);
+            }
+          } else {
+            await this.receiptsService.createReceipt(
+              customer.id,
+              queryRunner.manager,
+              incomingAmount,
+              null,
+              formattedMonth
+            );
+          }
+        }
+      }
+
 
       await queryRunner.commitTransaction();
       return savedCustomer;

@@ -102,6 +102,7 @@ class MonthDebtDto {
   month: string; // Formato esperado: 'YYYY-MM'
 
   @IsNumber()
-  amount: number; // Monto de la deuda para ese mes
+  @IsOptional()
+  amount?: number; // Monto de la deuda para ese mes
 }
 
