@@ -54,9 +54,18 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
     const length = Math.random() < 0.5 ? 11 : 15;
     const barcode = Array.from({ length }, () => Math.floor(Math.random() * 10)).join('');
 
+    const lastReceiptForTypeKey = await manager.findOne(Receipt, {
+        where: {
+          customer: { id: customer.id },
+          status: 'PENDING',
+        },
+        order: {
+          dateNow: 'ASC',
+        },
+  });
     // TIPO DE RECIBO
     let receiptTypeKey = 'OWNER';
-    const manualRenters = ['JOSE_RICARDO_AZNAR', 'CARLOS_ALBERTO_AZNAR', 'NIDIA_ROSA_MARIA_FONTELA', 'ALDO_RAUL_FONTELA'];
+    const manualRenters = lastReceiptForTypeKey ? lastReceiptForTypeKey.receiptTypeKey : ['JOSE_RICARDO_AZNAR', 'CARLOS_ALBERTO_AZNAR', 'NIDIA_ROSA_MARIA_FONTELA', 'ALDO_RAUL_FONTELA'];
 
     if (customer.customerType === 'RENTER') {
       const matchedOwner = customer.vehicleRenters.find(renter =>
