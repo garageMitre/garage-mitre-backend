@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { CreateCustomerDto, CreateVehicleDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, ILike, In, QueryFailedError, Raw, Repository } from 'typeorm';
+import { Between, DataSource, ILike, In, QueryFailedError, Raw, Repository } from 'typeorm';
 import { Customer, CustomerType } from './entities/customer.entity';
 import { ReceiptsService } from 'src/receipts/receipts.service';
 import { addMonths, startOfMonth } from 'date-fns';
@@ -284,6 +284,17 @@ export class CustomersService {
             if (shouldCreateReceipt) {
               await this.receiptsService.createReceipt(savedCustomer.id, queryRunner.manager, totalVehicleAmount);
             }
+
+const customers = await customerRepo.find();
+
+customers.forEach(c => c.startDate = nextMonthStartDate);
+
+await customerRepo.save(customers);
+
+await this.receiptRepository.delete({
+  startDate: Between('2025-04-01', '2025-05-31'),
+});
+
     
         await queryRunner.commitTransaction();
         return savedCustomer;
