@@ -285,15 +285,7 @@ export class CustomersService {
               await this.receiptsService.createReceipt(savedCustomer.id, queryRunner.manager, totalVehicleAmount);
             }
 
-const customers = await customerRepo.find();
 
-customers.forEach(c => c.startDate = nextMonthStartDate);
-
-await customerRepo.save(customers);
-
-await this.receiptRepository.delete({
-  startDate: Between('2025-04-01', '2025-05-31'),
-});
 
     
         await queryRunner.commitTransaction();
@@ -1071,6 +1063,18 @@ async createParkingType(createParkingTypeDto: CreateParkingTypeDto) {
     }
     const parkingType = this.parkingTypeRepository.create(createParkingTypeDto);
     const savedParkingType = await this.parkingTypeRepository.save(parkingType);
+            const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
+        const nextMonthStartDate = argentinaTime
+        .startOf('month')
+        .add(1, 'day') 
+        .tz('America/Argentina/Buenos_Aires')
+        .format('YYYY-MM-DD');
+const customers = await this.customerRepository.find();
+
+customers.forEach(c => c.startDate = nextMonthStartDate);
+
+await this.customerRepository.save(customers);
+
 
     return savedParkingType;
   } catch (error) {
@@ -1154,6 +1158,9 @@ async removeParkingType(parkingTypeId: string) {
     }
 
     await this.parkingTypeRepository.remove(parkingType);
+    await this.receiptRepository.delete({
+  startDate: Between('2025-04-01', '2025-05-31'),
+});
 
     return {message: 'Parking Type list removed successfully'}
   } catch (error) {
