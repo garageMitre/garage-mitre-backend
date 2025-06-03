@@ -11,6 +11,9 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { NotesModule } from './notes/notes.module';
+import { OpenAiModule } from './IA/openai/openai.module';
+import { WhatsappModule } from './IA/whatsapp/whatsapp.module';
+import { ChatModule } from './IA/chat/chat.module';
 
 @Module({
   imports: [ConfigModule.forRoot({
@@ -33,7 +36,10 @@ import { NotesModule } from './notes/notes.module';
   CustomersModule,
   UsersModule,
   AuthModule,
-  NotesModule
+  NotesModule,
+  OpenAiModule,
+  WhatsappModule,
+  ChatModule,
 ],
   controllers: [],
   providers: [],
