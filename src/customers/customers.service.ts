@@ -233,6 +233,19 @@ export class CustomersService {
       
                   vehiclesRenter.push(vehicle);
                 } else {
+                  const vehicleRenters = createCustomerDto.vehicleRenters;
+  
+                  if (vehicleRenters.length > 1) {
+                    const firstOwner = vehicleRenters[0].owner;
+        
+                    const allOwnersMatch = vehicleRenters.every(
+                      (vr) => vr.owner === firstOwner,
+                    );
+        
+                    if (!allOwnersMatch) {
+                      throw new BadRequestException('Todos los Propietarios deben ser iguales');
+                    }
+                  }
                   const normalizedGarageNumber = vehicleRenterDto.garageNumber.replace(/\s/g, '').toLowerCase();
 
                   const existingGarageNumberOwner = await vehicleRepo.findOne({
@@ -364,6 +377,10 @@ export class CustomersService {
       if (!customer) {
         throw new NotFoundException(`Customer ${id} not found`);
       }
+       const receipts = await receiptRepo.find({
+        where: { customer: { id: customer.id }, status: 'PENDING' },
+      });
+
     
 
       const manualOwners = [
@@ -375,6 +392,7 @@ export class CustomersService {
       
       // Desactivar rentActive de vehículos rentados
       if (customer.vehicleRenters.length > 0) {
+        let hasExecutedReceiptUpdate = false;
         for (const vehicleRenter of customer.vehicleRenters) {
           if (!manualOwners.includes(vehicleRenter.owner)) {
             const vehicleOwner = await vehicleRepo.findOne({
@@ -389,6 +407,53 @@ export class CustomersService {
               vehicleOwner.rentActive = false;
               await queryRunner.manager.save(vehicleOwner);
             }
+          }else{
+            const vehicleRenters = updateCustomerDto.vehicleRenters;
+  
+            if (vehicleRenters.length > 1) {
+              const firstOwner = vehicleRenters[0].owner;
+  
+              const allOwnersMatch = vehicleRenters.every(
+                (vr) => vr.owner === firstOwner,
+              );
+  
+              if (!allOwnersMatch) {
+                throw new BadRequestException('Todos los Propietarios deben ser iguales');
+              }
+            }
+                // Verificar si el owner cambió
+            const newOwner = vehicleRenters[0]?.owner;
+            const currentOwner = vehicleRenter.owner;
+
+            if (newOwner && newOwner !== currentOwner) {
+              if(!hasExecutedReceiptUpdate){
+                hasExecutedReceiptUpdate = true;
+                for(const receipt of receipts){
+  
+                  receipt.receiptTypeKey = newOwner;
+                  receipt.receiptNumber = '';
+                 const receiptTypeKey = newOwner;
+                const lastReceipt = await queryRunner.manager
+                  .createQueryBuilder(Receipt, 'receipt')
+                  .setLock('pessimistic_write') // <-- esto evita que otras instancias lean al mismo tiempo
+                  .where('receipt.receiptTypeKey = :type', { type: receiptTypeKey })
+                  .andWhere('receipt.receiptNumber IS NOT NULL')
+                  .orderBy('receipt.receiptNumber', 'DESC')
+                  .getOne()
+                  if (lastReceipt && lastReceipt.receiptNumber) {
+                  const [shortNumber, longNumber] = lastReceipt.receiptNumber.replace('N° ', '').split('-');
+                  const nextShort = parseInt(shortNumber).toString().padStart(4, '0');
+                  const nextLong = (parseInt(longNumber) + 1).toString().padStart(8, '0');
+                  receipt.receiptNumber = `N° ${nextShort}-${nextLong}`;
+                } else {
+                  receipt.receiptNumber = 'N° 0000-00000001';
+                }
+  
+                  await queryRunner.manager.save(receipt);
+                }
+              }
+            }
+
           }
         }
         await queryRunner.manager.remove(VehicleRenter, customer.vehicleRenters);
@@ -628,6 +693,7 @@ export class CustomersService {
                   customer: customer,
                 });
                 customer.vehicleRenters.push(vehicle)
+
     
                 vehiclesRenter.push(vehicle);
               }
@@ -645,23 +711,36 @@ export class CustomersService {
       const totalVehicleAmount = customer.vehicles?.length
         ? customer.vehicles.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0)
         : customer.vehicleRenters.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0);
-  
+
       const price = totalVehicleAmount;
       const oldMonthsDebtCustoemr = customer.monthsDebt;
       const { vehicles, vehicleRenters, ...customerData } = updateCustomerDto;
+      const hasDebtCustomerBefore = customer.hasDebt;
       customerRepo.merge(customer, customerData);
       const savedCustomer = await queryRunner.manager.save(customer);
-  
-      const receipts = await receiptRepo.find({
-        where: { customer: { id: customer.id }, status: 'PENDING' },
-      });
+for (const receipt of receipts) {
+  const receiptMonthStr = receipt.startDate.slice(0, 7); // 'YYYY-MM'
 
-      for(const receipt of receipts){
-        receipt.price = price;
-        await queryRunner.manager.save(receipt);
-      }
+  console.log('Receipt startDate:', receipt.startDate);
+  console.log('Receipt month:', receiptMonthStr);
 
-      if (updateCustomerDto.hasDebt) {
+  const hasDebt = customer.monthsDebt.some(debt => {
+    const debtMonth = debt.month.slice(0, 7);
+    console.log('Checking debt month:', debt.month, '=>', debtMonth);
+    return debtMonth === receiptMonthStr;
+  });
+
+  console.log('hasDebt:', hasDebt);
+
+  if (hasDebt) {
+    continue;
+  }
+
+  receipt.price = price;
+  await queryRunner.manager.save(receipt);
+}
+
+      if (updateCustomerDto.hasDebt && updateCustomerDto.hasDebt !== hasDebtCustomerBefore) {
         const normalizeMonth = (month: string) =>
           month.length === 7 ? `${month}-01` : month;
         const prevMonths = (oldMonthsDebtCustoemr || []).map(m =>
