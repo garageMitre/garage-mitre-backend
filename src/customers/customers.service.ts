@@ -1069,11 +1069,6 @@ async createParkingType(createParkingTypeDto: CreateParkingTypeDto) {
         .add(1, 'day') 
         .tz('America/Argentina/Buenos_Aires')
         .format('YYYY-MM-DD');
-const customers = await this.customerRepository.find();
-
-customers.forEach(c => c.startDate = nextMonthStartDate);
-
-await this.customerRepository.save(customers);
 
 
     return savedParkingType;
@@ -1158,9 +1153,6 @@ async removeParkingType(parkingTypeId: string) {
     }
 
     await this.parkingTypeRepository.remove(parkingType);
-    await this.receiptRepository.delete({
-  startDate: Between('2025-04-01', '2025-05-31'),
-});
 
     return {message: 'Parking Type list removed successfully'}
   } catch (error) {
