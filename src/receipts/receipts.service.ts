@@ -206,10 +206,10 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
         if (!boxList) {
           boxList = await this.boxListsService.createBox({
             date: now,
-            totalPrice:(receipt.paymentType === 'CASH' || receipt.paymentType === 'CHECK') ? receipt.price : -receipt.price,
+            totalPrice:(receipt.paymentType === 'CASH' || receipt.paymentType === 'CHECK') ? receipt.price : 0,
           });
         } else {
-          boxList.totalPrice += (receipt.paymentType === 'CASH' || receipt.paymentType === 'CHECK') ? receipt.price : -receipt.price;
+          boxList.totalPrice += (receipt.paymentType === 'CASH' || receipt.paymentType === 'CHECK') ? receipt.price : 0;
           await this.boxListsService.updateBox(boxList.id, {
             totalPrice: boxList.totalPrice,
           }, queryRunner.manager);
@@ -296,7 +296,7 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
         }
     
         if (lastPaidReceipt.paymentType === 'TRANSFER') {
-          boxList.totalPrice += lastPaidReceipt.price;
+          boxList.totalPrice += 0;
         } else {
           boxList.totalPrice -= lastPaidReceipt.price;
         }
