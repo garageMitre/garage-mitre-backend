@@ -3,6 +3,7 @@ import {
   Entity,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import { TICKET_DAY_TYPE, TicketDayType } from './ticket.entity';
 
 export const VEHICLE_TYPE = ['AUTO', 'CAMIONETA'] as const;
 export type VehicleType = (typeof VEHICLE_TYPE)[number];
@@ -16,10 +17,10 @@ export class TicketPrice {
   id: string;
 
   @Column('int',{nullable:true})
-  dayPrice: number;
+  price: number;
 
-  @Column('int', {nullable:true})
-  nightPrice: number;
+  @Column('enum', { enum: TICKET_DAY_TYPE, nullable:true})
+  ticketDayType: TicketDayType;
 
   @Column('int', {nullable:true})
   ticketTimePrice: number;

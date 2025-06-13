@@ -11,6 +11,9 @@ import { TicketPrice } from './ticket-price.entity';
 export const TICKET_TYPE = ['AUTO', 'CAMIONETA'] as const;
 export type TicketType = (typeof TICKET_TYPE)[number];
 
+export const TICKET_DAY_TYPE= ['DAY', 'NIGHT'] as const;
+export type TicketDayType = (typeof TICKET_DAY_TYPE)[number];
+
 @Entity({ name: 'tickets' })
 export class Ticket {
   @PrimaryGeneratedColumn('uuid')
@@ -22,12 +25,9 @@ export class Ticket {
   @Column('int', {nullable:true})
   price: number;
 
-  @Column('int', {nullable:true})
-  dayPrice: number;
+  @Column('enum', { enum: TICKET_DAY_TYPE, nullable:true})
+  ticketDayType: string;
 
-  @Column('int', {nullable:true})
-  nightPrice: number;
-  
   @Column('enum', { enum: TICKET_TYPE})
   vehicleType: string;
 

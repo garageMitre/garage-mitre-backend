@@ -45,10 +45,10 @@ export class TicketsService {
 
   async createTicketPrice(createTicketPriceDto: CreateTicketPriceDto) {
     try {
-      console.log(createTicketPriceDto)
-      if(createTicketPriceDto.vehicleType && createTicketPriceDto.dayPrice){
+
+      if(createTicketPriceDto.vehicleType && createTicketPriceDto.ticketDayType){
         const type = await this.ticketPriceRepository.findOne({where:{vehicleType:createTicketPriceDto.vehicleType, ticketTimeType: IsNull()}})
-        if(type){
+        if(type && type.ticketDayType === createTicketPriceDto.ticketDayType){
           throw new NotFoundException({
             code: 'TICKET_PRICE_TYPE_FOUND',
             message: `Ya existe un precio ticket con el tipo de vehiculo ${createTicketPriceDto.vehicleType}`,
@@ -125,12 +125,10 @@ async updateTicketPrice(id: string, updateTicketPriceDto: UpdateTicketPriceDto) 
       throw new NotFoundException('Ticket Price not found')
     }
 
-    const tickets = await this.ticketRepository.find({where:{vehicleType:updateTicketPriceDto.vehicleType}});
-    console.log(tickets)
+    const tickets = await this.ticketRepository.find({where:{vehicleType:updateTicketPriceDto.vehicleType, ticketDayType: updateTicketPriceDto.ticketDayType}});
 
     for(const ticket of tickets){
-      ticket.dayPrice = updateTicketPriceDto.dayPrice;
-      ticket.nightPrice = updateTicketPriceDto.nightPrice;
+      ticket.price = updateTicketPriceDto.price;
       await this.ticketRepository.save(ticket);
     }
    
@@ -170,15 +168,14 @@ async removeTicketPrice(id: string) {
   async create(createTicketDto: CreateTicketDto) {
     try {
       const ticket = this.ticketRepository.create(createTicketDto);
-      const ticketPrice = await this.ticketPriceRepository.findOne({where:{vehicleType:createTicketDto.vehicleType, ticketTimeType: IsNull()}})
+      const ticketPrice = await this.ticketPriceRepository.findOne({where:{vehicleType:createTicketDto.vehicleType, ticketDayType: createTicketDto.ticketDayType, ticketTimeType: IsNull()}})
       if(!ticketPrice){
         throw new NotFoundException({
           code: 'TICKET_PRICE_NOT_FOUND',
           message: `Precio ticket con el tipo ${createTicketDto.vehicleType} no existe, porfavor pedi al admin que lo cree.`,
         });
       }
-      ticket.dayPrice = ticketPrice.dayPrice;
-      ticket.nightPrice = ticketPrice.nightPrice;
+      ticket.price = ticketPrice.price;
       const savedTicket = await this.ticketRepository.save(ticket);
 
       return savedTicket;
@@ -213,15 +210,14 @@ async removeTicketPrice(id: string) {
       
       const updateTicket = this.ticketRepository.merge(ticket, updateTicketDto);
 
-      const ticketPrice = await this.ticketPriceRepository.findOne({where:{vehicleType:updateTicketDto.vehicleType}})
+      const ticketPrice = await this.ticketPriceRepository.findOne({where:{vehicleType:updateTicketDto.vehicleType, ticketDayType: updateTicketDto.ticketDayType, ticketTimeType: IsNull()}})
       if(!ticketPrice){
         throw new NotFoundException({
           code: 'TICKET_PRICE_NOT_FOUND',
           message: `Precio ticket con el tipo ${updateTicketDto.vehicleType} no existe, porfavor pedi al admin que lo cree.`,
         });
       }
-      updateTicket.dayPrice = ticketPrice.dayPrice;
-      updateTicket.nightPrice = ticketPrice.nightPrice;
+      updateTicket.price = ticketPrice.price;
 
       const savedTicket = await this.ticketRepository.save(updateTicket); 
 
@@ -479,30 +475,20 @@ async updateRegistration(existingRegistration: TicketRegistration, formattedDay:
       if (minutesPassed < 5) {
         ticket.price = 0;
       } else {
-        const isDaytime = argentinaTime.isBetween(
-          dayjs(argentinaTime).startOf('day').hour(6),
-          dayjs(argentinaTime).startOf('day').hour(19),
-          null,
-          '[)'
-        );
-      
-        const basePrice = isDaytime ? ticket.dayPrice : ticket.nightPrice;
-      
-        // Tarifa por bloques de 1h con tolerancia de 5 min
-        const blockDuration = 60; // 1 hora
-        const tolerance = 5;
-        const totalAllowed = blockDuration + tolerance;
-      
-        let multiplier = 1;
-      
-        if (minutesPassed > totalAllowed) {
-          // Restamos la primera hora con tolerancia, y luego calculamos los bloques
-          const extraMinutes = minutesPassed - totalAllowed;
-          const extraBlocks = Math.floor(extraMinutes / blockDuration) + 1;
-          multiplier += extraBlocks;
-        }
-      
-        ticket.price = basePrice;
+        const basePrice = ticket.price;
+
+        const blockDuration = 60;     // Duración de cada bloque en minutos
+        const tolerance = 5;          // Tolerancia por bloque
+        const totalPerBlock = blockDuration + tolerance;
+
+        // Restamos los primeros 5 minutos que son gratuitos
+        const effectiveMinutes = minutesPassed - 5;
+
+        // Calculamos la cantidad de bloques a cobrar
+        const blocksToCharge = Math.ceil(effectiveMinutes / totalPerBlock);
+
+        // Precio final: basePrice * cantidad de bloques
+        ticket.price = basePrice * blocksToCharge;
       }
       
       await this.ticketRepository.save(ticket);
