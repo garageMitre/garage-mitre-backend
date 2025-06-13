@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { Ticket } from './entities/ticket.entity';
 import { TicketRegistration } from './entities/ticket-registration.entity';
 import { CreateTicketDto } from './dto/create-ticket.dto';
@@ -45,9 +45,10 @@ export class TicketsService {
 
   async createTicketPrice(createTicketPriceDto: CreateTicketPriceDto) {
     try {
-      if(createTicketPriceDto.vehicleType && createTicketPriceDto.ticketTimeType === null){
-        const type = await this.ticketPriceRepository.find({where:{vehicleType:createTicketPriceDto.vehicleType}})
-        if(type.length > 0){
+      console.log(createTicketPriceDto)
+      if(createTicketPriceDto.vehicleType && createTicketPriceDto.dayPrice){
+        const type = await this.ticketPriceRepository.findOne({where:{vehicleType:createTicketPriceDto.vehicleType, ticketTimeType: IsNull()}})
+        if(type){
           throw new NotFoundException({
             code: 'TICKET_PRICE_TYPE_FOUND',
             message: `Ya existe un precio ticket con el tipo de vehiculo ${createTicketPriceDto.vehicleType}`,
@@ -60,7 +61,6 @@ export class TicketsService {
               vehicleType: createTicketPriceDto.vehicleType,
             },
           });
-        console.log(ticketTime)
         if(ticketTime.length > 0){
           throw new NotFoundException({
             code: 'TICKET_TIME_PRICE_TYPE_FOUND',
@@ -170,7 +170,7 @@ async removeTicketPrice(id: string) {
   async create(createTicketDto: CreateTicketDto) {
     try {
       const ticket = this.ticketRepository.create(createTicketDto);
-      const ticketPrice = await this.ticketPriceRepository.findOne({where:{vehicleType:createTicketDto.vehicleType}})
+      const ticketPrice = await this.ticketPriceRepository.findOne({where:{vehicleType:createTicketDto.vehicleType, ticketTimeType: IsNull()}})
       if(!ticketPrice){
         throw new NotFoundException({
           code: 'TICKET_PRICE_NOT_FOUND',

@@ -22,10 +22,10 @@ export class Ticket {
   @Column('int', {nullable:true})
   price: number;
 
-  @Column('int',)
+  @Column('int', {nullable:true})
   dayPrice: number;
 
-  @Column('int',)
+  @Column('int', {nullable:true})
   nightPrice: number;
   
   @Column('enum', { enum: TICKET_TYPE})
