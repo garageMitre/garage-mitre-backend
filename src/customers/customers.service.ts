@@ -715,68 +715,37 @@ export class CustomersService {
       const price = totalVehicleAmount;
       const oldMonthsDebtCustoemr = customer.monthsDebt;
       const { vehicles, vehicleRenters, ...customerData } = updateCustomerDto;
-      const hasDebtCustomerBefore = customer.hasDebt;
+
       customerRepo.merge(customer, customerData);
       const savedCustomer = await queryRunner.manager.save(customer);
-for (const receipt of receipts) {
-  const receiptMonthStr = receipt.startDate.slice(0, 7); // 'YYYY-MM'
+        for (const receipt of receipts) {
+          const receiptMonthStr = receipt.startDate.slice(0, 7); // 'YYYY-MM'
 
-  console.log('Receipt startDate:', receipt.startDate);
-  console.log('Receipt month:', receiptMonthStr);
 
-  const hasDebt = customer.monthsDebt.some(debt => {
-    const debtMonth = debt.month.slice(0, 7);
-    console.log('Checking debt month:', debt.month, '=>', debtMonth);
-    return debtMonth === receiptMonthStr;
-  });
+          const hasDebt = customer.monthsDebt.some(debt => {
+            const debtMonth = debt.month.slice(0, 7);
+            return debtMonth === receiptMonthStr;
+          });
 
-  console.log('hasDebt:', hasDebt);
 
-  if (hasDebt) {
-    continue;
-  }
+          if (hasDebt) {
+            continue;
+          }
 
-  receipt.price = price;
-  await queryRunner.manager.save(receipt);
-}
+          receipt.price = price;
+          await queryRunner.manager.save(receipt);
+        }
 
-      if (updateCustomerDto.hasDebt && updateCustomerDto.hasDebt !== hasDebtCustomerBefore) {
-        const normalizeMonth = (month: string) =>
-          month.length === 7 ? `${month}-01` : month;
-        const prevMonths = (oldMonthsDebtCustoemr || []).map(m =>
-          normalizeMonth(m.month)
-        );
+
+      if (updateCustomerDto.hasDebt && updateCustomerDto.monthsDebt !== oldMonthsDebtCustoemr) {
 
         const newMonthsDebt = Array.isArray(updateCustomerDto.monthsDebt)
           ? updateCustomerDto.monthsDebt
           : JSON.parse(updateCustomerDto.monthsDebt);
 
-        const dtoMonths = newMonthsDebt.map(m => normalizeMonth(m.month));
-        const dtoMonthsSet = new Set(dtoMonths);
 
         const receiptRepoTxn = queryRunner.manager.getRepository(Receipt);
 
-        // for (const prevMonth of prevMonths) {
-        //   if (!dtoMonthsSet.has(prevMonth)) {
-        //     console.log(`🗑 Intentando eliminar recibo con startDate="${prevMonth}"`);
-        //     // Encontrá el recibo EXACTO a eliminar (solo PENDING, opcional)
-        //     const receiptToDelete = await receiptRepoTxn.findOne({
-        //       where: {
-        //         customer: { id: customer.id },
-        //         startDate: prevMonth,
-        //         status: 'PENDING',
-        //       },
-        //     });
-
-        //     if (receiptToDelete) {
-        //       // Lo removemos con el repositorio transaccional
-        //       await receiptRepoTxn.remove(receiptToDelete);
-        //       console.log(`✅ Recibo eliminado del mes: ${prevMonth}`);
-        //     } else {
-        //       console.warn(`⚠️ No se encontró recibo con startDate="${prevMonth}"`);
-        //     }
-        //   }
-        // }
 
         const formatMonth = (m: string) =>
           dayjs(m.length === 7 ? `${m}-01` : m).format('YYYY-MM-DD');
