@@ -80,53 +80,15 @@ export class CustomersService {
 
     
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
-        const nextMonthStartDate = argentinaTime
-        .startOf('month')
-        .add(1, 'day') 
-        .tz('America/Argentina/Buenos_Aires')
-        .format('YYYY-MM-DD');
+        // const nextMonthStartDate = argentinaTime
+        // .startOf('month')
+        // .add(1, 'day') 
+        // .tz('America/Argentina/Buenos_Aires')
+        // .format('YYYY-MM-DD');
 
-        customer.startDate = nextMonthStartDate;
+        // customer.startDate = nextMonthStartDate;
         const savedCustomer = await customerRepo.save(customer);
-          if (createCustomerDto.hasDebt) {
-            let parsedMonthsDebt: { month: string; amount?: number }[];
 
-            try {
-              parsedMonthsDebt = Array.isArray(createCustomerDto.monthsDebt)
-                ? createCustomerDto.monthsDebt
-                : JSON.parse(createCustomerDto.monthsDebt);
-            } catch (err) {
-              throw new BadRequestException('Formato inválido para monthsDebt');
-            }
-
-            // Validar formato de cada elemento
-            for (const d of parsedMonthsDebt) {
-              if (!d.month || typeof d.month !== 'string') {
-                throw new BadRequestException('Cada elemento en monthsDebt debe tener un mes válido');
-              }
-            }
-
-            const minMonth = parsedMonthsDebt
-              .map((d) => dayjs(d.month.length === 7 ? `${d.month}-01` : d.month))
-              .sort((a, b) => a.unix() - b.unix())[0]
-              .format('YYYY-MM-DD');
-
-            savedCustomer.startDate = minMonth;
-            savedCustomer.monthsDebt = parsedMonthsDebt;
-
-            await queryRunner.manager.save(savedCustomer);
-
-            for (const debt of parsedMonthsDebt) {
-
-              await this.receiptsService.createReceipt(
-                savedCustomer.id,
-                queryRunner.manager,
-                debt.amount,
-                null,
-                debt.month.length === 7 ? `${debt.month}-01` : debt.month,
-              );
-            }
-          }
 
 
         const vehicles = [];
@@ -230,7 +192,7 @@ export class CustomersService {
       
                   vehicleOwner.rentActive = true;
                   await vehicleRepo.save(vehicleOwner);
-      
+
                   vehiclesRenter.push(vehicle);
                 } else {
                   const vehicleRenters = createCustomerDto.vehicleRenters;
@@ -266,7 +228,7 @@ export class CustomersService {
                       message: `El número de garage ${vehicleRenterDto.garageNumber} ya se encuentra en uso`,
                     });
                   }
-      
+                  
                   const vehicle = vehicleRenterRepo.create({
                     ...vehicleRenterDto,
                     customer: savedCustomer,
@@ -298,7 +260,35 @@ export class CustomersService {
               await this.receiptsService.createReceipt(savedCustomer.id, queryRunner.manager, totalVehicleAmount);
             }
 
+          if (createCustomerDto.hasDebt) {
+            let parsedMonthsDebt: { month: string; amount?: number }[];
 
+            try {
+              parsedMonthsDebt = Array.isArray(createCustomerDto.monthsDebt)
+                ? createCustomerDto.monthsDebt
+                : JSON.parse(createCustomerDto.monthsDebt);
+            } catch (err) {
+              throw new BadRequestException('Formato inválido para monthsDebt');
+            }
+
+            // Validar formato de cada elemento
+            for (const d of parsedMonthsDebt) {
+              if (!d.month || typeof d.month !== 'string') {
+                throw new BadRequestException('Cada elemento en monthsDebt debe tener un mes válido');
+              }
+            }
+
+            for (const debt of parsedMonthsDebt) {
+
+              await this.receiptsService.createReceipt(
+                savedCustomer.id,
+                queryRunner.manager,
+                debt.amount,
+                null,
+                debt.month.length === 7 ? `${debt.month}-01` : debt.month,
+              );
+            }
+          }
 
     
         await queryRunner.commitTransaction();
@@ -317,7 +307,8 @@ export class CustomersService {
   async findAll(customer: CustomerType){
     try {
       const customers = await this.customerRepository.find({
-        relations: ['receipts','vehicles','vehicles.parkingType','vehicleRenters', 'vehicles.vehicleRenters', 'vehicleRenters.customer', 'vehicleRenters.vehicle', 'vehicleRenters.vehicle.customer'],
+        relations: ['receipts','receipts.payments','receipts.paymentHistoryOnAccount','vehicles','vehicles.parkingType','vehicleRenters', 'vehicles.vehicleRenters', 'vehicleRenters.customer',
+           'vehicleRenters.vehicle', 'vehicleRenters.vehicle.customer'],
         where: {customerType : customer},
         withDeleted: true
       })
@@ -332,7 +323,8 @@ export class CustomersService {
     try {
       const customer = await this.customerRepository.findOne({
         where: { id },
-        relations: ['receipts','vehicles','vehicles.parkingType','vehicleRenters', 'vehicles.vehicleRenters', 'vehicleRenters.customer', 'vehicleRenters.vehicle', 'vehicleRenters.vehicle.customer'],
+        relations: ['receipts','vehicles','vehicles.parkingType','vehicleRenters', 'vehicles.vehicleRenters', 
+          'vehicleRenters.customer', 'vehicleRenters.vehicle', 'vehicleRenters.vehicle.customer', 'receipts.payments','receipts.paymentHistoryOnAccount'],
         withDeleted: true
       });
   
@@ -704,13 +696,11 @@ export class CustomersService {
         }
       }
   
-      // Actualizar Customer
 
-  
-      // Actualizar recibo si está pendiente
       const totalVehicleAmount = customer.vehicles?.length
         ? customer.vehicles.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0)
         : customer.vehicleRenters.reduce((acc, vehicle) => acc + (vehicle.amount || 0), 0);
+        
 
       const price = totalVehicleAmount;
       const oldMonthsDebtCustoemr = customer.monthsDebt;
@@ -718,27 +708,23 @@ export class CustomersService {
 
       customerRepo.merge(customer, customerData);
       const savedCustomer = await queryRunner.manager.save(customer);
-        for (const receipt of receipts) {
-          const receiptMonthStr = receipt.startDate.slice(0, 7); // 'YYYY-MM'
+      for (const receipt of receipts) {
+        const receiptMonthStr = receipt.startDate.slice(0, 7);
+
+        const hasDebt = customer.monthsDebt.some(debt => {
+          const debtMonth = debt.month.slice(0, 7);
+          return debtMonth === receiptMonthStr;
+        });
+
+        if (hasDebt) continue;
+        await queryRunner.manager.update(Receipt, receipt.id, { price, startAmount:price });
+      }
 
 
-          const hasDebt = customer.monthsDebt.some(debt => {
-            const debtMonth = debt.month.slice(0, 7);
-            return debtMonth === receiptMonthStr;
-          });
-
-
-          if (hasDebt) {
-            continue;
-          }
-
-          receipt.price = price;
-          await queryRunner.manager.save(receipt);
-        }
-
-
-      if (updateCustomerDto.hasDebt && updateCustomerDto.monthsDebt !== oldMonthsDebtCustoemr) {
-
+      if (
+        updateCustomerDto.hasDebt &&
+        JSON.stringify(updateCustomerDto.monthsDebt) !== JSON.stringify(oldMonthsDebtCustoemr)
+      ) {
         const newMonthsDebt = Array.isArray(updateCustomerDto.monthsDebt)
           ? updateCustomerDto.monthsDebt
           : JSON.parse(updateCustomerDto.monthsDebt);
@@ -749,15 +735,6 @@ export class CustomersService {
 
         const formatMonth = (m: string) =>
           dayjs(m.length === 7 ? `${m}-01` : m).format('YYYY-MM-DD');
-
-        const minMonth = newMonthsDebt
-          .map(d => dayjs(formatMonth(d.month)))
-          .sort((a, b) => a.unix() - b.unix())[0]
-          .format('YYYY-MM-DD');
-
-        customer.startDate = minMonth;
-        customer.monthsDebt = newMonthsDebt;
-        await queryRunner.manager.save(customer);
 
         for (const monthDebt of newMonthsDebt) {
           const formattedMonth = formatMonth(monthDebt.month);
@@ -774,7 +751,6 @@ export class CustomersService {
             if (existing.price !== incomingAmount) {
               existing.price = incomingAmount;
               await receiptRepoTxn.save(existing);
-              console.log('Recibo actualizado:', existing);
             }
           } else {
             await this.receiptsService.createReceipt(
@@ -1088,6 +1064,8 @@ async updateAmount(updateAmountAllCustomerDto: UpdateAmountAllCustomerDto) {
         ).length;
 
         receipt.price += updateAmountAllCustomerDto.amount * vehiclesCount;
+        receipt.startAmount += updateAmountAllCustomerDto.amount * vehiclesCount;
+
         await this.receiptRepository.save(receipt);
       }
     }
@@ -1163,9 +1141,13 @@ async createParkingType(createParkingTypeDto: CreateParkingTypeDto) {
           if (vehiclesToUpdate.length > 0) {
             const count = vehiclesToUpdate.length;
             const amountDifference = (updateParkingTypeDto.amount - parkingType.amount) * count;
+            
 
             for (const receipt of owner.receipts) {
-              if (receipt.status === 'PENDING') {
+              const receiptMonthStr = receipt.startDate.slice(0, 7); // ej: '2025-05'
+              const hasDebtForMonth = owner.monthsDebt?.some(debt => debt.month.slice(0, 7) === receiptMonthStr);
+
+              if (!hasDebtForMonth && receipt.status === 'PENDING') {
                 receipt.price += amountDifference;
                 receipt.startAmount = receipt.price;
                 await this.receiptRepository.save(receipt);

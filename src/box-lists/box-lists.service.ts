@@ -117,7 +117,19 @@ async createBox(createBoxListDto: CreateBoxListDto) {
           'ticketRegistrationForDays',
           'receipts.customer.vehicleRenters',
           'receipts.customer.vehicles',
-          'receipts.customer.vehicleRenters.vehicle.customer'
+          'receipts.customer.vehicleRenters.vehicle.customer',
+          'receiptPayments',
+          'receiptPayments.receipt',
+          'receiptPayments.receipt.customer',
+          'receiptPayments.receipt.customer.vehicleRenters',
+          'receiptPayments.receipt.customer.vehicles',
+          'receiptPayments.receipt.customer.vehicleRenters.vehicle.customer',
+          'paymentHistoryOnAccount',
+          'paymentHistoryOnAccount.receipt',
+          'paymentHistoryOnAccount.receipt.customer',
+          'paymentHistoryOnAccount.receipt.customer.vehicleRenters',
+          'paymentHistoryOnAccount.receipt.customer.vehicles',
+          'paymentHistoryOnAccount.receipt.customer.vehicleRenters.vehicle.customer',
         ],
       });
       

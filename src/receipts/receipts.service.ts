@@ -13,6 +13,8 @@ import * as utc from 'dayjs/plugin/utc';
 import * as timezone from 'dayjs/plugin/timezone';
 import * as isBetween from 'dayjs/plugin/isBetween'; 
 import { Cron } from '@nestjs/schedule';
+import { ReceiptPayment } from './entities/receipt-payment.entity';
+import { PaymentHistoryOnAccount } from './entities/payment-history-on-account.entity';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -27,6 +29,10 @@ export class ReceiptsService {
         private readonly receiptRepository: Repository<Receipt>,
         @InjectRepository(Customer)
         private readonly customerRepository: Repository<Customer>,
+        @InjectRepository(ReceiptPayment)
+        private readonly receiptPaymentRepository: Repository<ReceiptPayment>,
+        @InjectRepository(PaymentHistoryOnAccount)
+        private readonly paymentHistoryOnAccountRepository: Repository<PaymentHistoryOnAccount>,
         private readonly boxListsService: BoxListsService,
         private readonly dataSource: DataSource,
     ) {}
@@ -71,6 +77,7 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
       const matchedOwner = customer.vehicleRenters.find(renter =>
         manualRenters.includes(renter.owner)
       );
+
       receiptTypeKey = matchedOwner ? matchedOwner.owner : 'GARAGE_MITRE';
     }
 
@@ -115,11 +122,11 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
 }
 
 
-    async updateReceipt(customerId: string, updateReceiptDto?: UpdateReceiptDto) {
+    async updateReceipt(receiptId: string, customerId: string, updateReceiptDto?: UpdateReceiptDto) {
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
       await queryRunner.startTransaction();
-    
+      
       try {
         const customer = await queryRunner.manager.findOne(Customer, {
           where: { id: customerId },
@@ -127,67 +134,25 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
         });
     
         if (!customer) throw new NotFoundException('Customer not found');
-    
-        const receipt = await queryRunner.manager.findOne(Receipt, {
-          where: {
-            customer: { id: customer.id },
-            status: 'PENDING',
-          },
-          order: {
-            dateNow: 'ASC',
-          },
-        });
+
+
+        const receipt = !updateReceiptDto.barcode
+          ? await queryRunner.manager.findOne(Receipt, {
+              where: { id: receiptId }, // si necesitás esa relación
+            })
+          : await queryRunner.manager.findOne(Receipt, {
+              where: { barcode: updateReceiptDto.barcode},
+            })
+
 
 
 
         if (!receipt) throw new NotFoundException('Receipt not found');
 
-        
+        if (receipt.status === 'PAID') throw new BadRequestException('Receipt already paid');
+
     
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
-        const dataNow = argentinaTime
-        .startOf('month')
-        .add(1, 'day') 
-        .tz('America/Argentina/Buenos_Aires')
-        .format('YYYY-MM-DD');
-        const hasPaid = customer.startDate
-        ? dayjs(dataNow).isBefore(dayjs(customer.startDate))
-        : false;
-
-    
-        if (hasPaid) {
-          throw new NotFoundException({
-            code: 'RECEIPT_PAID',
-            message: 'This bill was already paid this month.',
-          });
-        }
-      const closestPendingReceipt = await queryRunner.manager.findOne(Receipt, {
-        where: {
-          customer: { id: customer.id },
-          status: 'PENDING',
-          startDate: MoreThan(receipt.startDate), 
-        },
-        order: { startDate: 'ASC' },
-      });
-
-
-          let baseDate: dayjs.Dayjs;
-          if (closestPendingReceipt) {
-            baseDate = dayjs(closestPendingReceipt.startDate).tz('America/Argentina/Buenos_Aires');
-          } else {
-            baseDate = dayjs().add(1, 'month').tz('America/Argentina/Buenos_Aires');
-          }
-
-          const nextMonthStartDate = baseDate.startOf('month').add(1, 'day').format('YYYY-MM-DD');
-          const prevMonthStartDate = baseDate
-          .subtract(1, 'month')
-          .add(1, 'day') 
-          .format('YYYY-MM-DD');
-
-
-          customer.previusStartDate = prevMonthStartDate;
-          customer.startDate = nextMonthStartDate;
-
     
         await queryRunner.manager.save(Customer, customer);
     
@@ -195,27 +160,106 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
 
         }
     
-        receipt.status = 'PAID';
-        receipt.paymentType = updateReceiptDto.paymentType;
-        receipt.paymentDate = argentinaTime.format('YYYY-MM-DD');
+        
+        if(updateReceiptDto.onAccount === false){
+          if(updateReceiptDto.payments.length > 1){
+            let totalVerify = 0;
+            for (const payment of updateReceiptDto.payments) {
+              totalVerify += payment.price ?? 0;
+            }
     
-        const now = argentinaTime.format('YYYY-MM-DD')
+            if (totalVerify !== receipt.price) {
+              throw new BadRequestException('La suma de los montos no es igual al total del recibo.');
+            }
+          }
+  
+          for (const payment of updateReceiptDto.payments) {
+            const now = argentinaTime.format('YYYY-MM-DD');
+  
+            let boxList = await this.boxListsService.findBoxByDate(now, queryRunner.manager);
+  
+            const total = payment.price ? payment.price : receipt.price
+            if (!boxList) {
+              boxList = await this.boxListsService.createBox({
+                date: now,
+                totalPrice: (payment.paymentType === 'CASH' || payment.paymentType === 'CHECK')  ? total : 0,
+              });
+            } else {
+              boxList.totalPrice += (payment.paymentType === 'CASH' || payment.paymentType === 'CHECK') ? total : 0;
+              await this.boxListsService.updateBox(boxList.id, {
+                totalPrice: boxList.totalPrice,
+              }, queryRunner.manager);
+            }
+  
+            const newPayment = this.receiptPaymentRepository.create({
+              paymentType: payment.paymentType,
+              price: total,
+              paymentDate: argentinaTime.format('YYYY-MM-DD'),
+              receipt,
+              boxList: { id: boxList.id } as BoxList, // <- asignar boxList antes del save
+            });
+  
+            await this.receiptPaymentRepository.save(newPayment);
+          }
+          receipt.status = 'PAID';
+          receipt.paymentDate = argentinaTime.format('YYYY-MM-DD');
+        }else{
 
-        let boxList = await this.boxListsService.findBoxByDate(now, queryRunner.manager);
+          if(updateReceiptDto.payments.length > 0){
+            let totalVerify = 0;
+            for (const payment of updateReceiptDto.payments) {
+              totalVerify += payment.price ?? 0;
+            }
     
-        if (!boxList) {
-          boxList = await this.boxListsService.createBox({
-            date: now,
-            totalPrice:(receipt.paymentType === 'CASH' || receipt.paymentType === 'CHECK') ? receipt.price : 0,
-          });
-        } else {
-          boxList.totalPrice += (receipt.paymentType === 'CASH' || receipt.paymentType === 'CHECK') ? receipt.price : 0;
-          await this.boxListsService.updateBox(boxList.id, {
-            totalPrice: boxList.totalPrice,
-          }, queryRunner.manager);
+            if (totalVerify > receipt.price) {
+              throw new BadRequestException('El pago a cuenta es mayor que el total del recibo.');
+            }
+
+            if (totalVerify === receipt.price) {
+              throw new BadRequestException('El pago a cuenta es igual que el total del recibo, si desea pagar su totalidad desactive la funcion pago a cuenta.');
+            }
+
+            if(totalVerify === receipt.price){
+              receipt.status = 'PAID';
+              receipt.paymentDate = argentinaTime.format('YYYY-MM-DD');
+            }else{
+              receipt.price = receipt.price - totalVerify;
+            }
+          }
+  
+          for (const payment of updateReceiptDto.payments) {
+            const now = argentinaTime.format('YYYY-MM-DD');
+  
+            let boxList = await this.boxListsService.findBoxByDate(now, queryRunner.manager);
+  
+            const total = payment.price;
+            if (!boxList) {
+              boxList = await this.boxListsService.createBox({
+                date: now,
+                totalPrice: (payment.paymentType === 'CASH' || payment.paymentType === 'CHECK')  ? total : 0,
+              });
+            } else {
+              boxList.totalPrice += (payment.paymentType === 'CASH' || payment.paymentType === 'CHECK') ? total : 0;
+              await this.boxListsService.updateBox(boxList.id, {
+                totalPrice: boxList.totalPrice,
+              }, queryRunner.manager);
+            }
+  
+            const newPayment = this.paymentHistoryOnAccountRepository.create({
+              paymentType: payment.paymentType,
+              price: total,
+              paymentDate: argentinaTime.format('YYYY-MM-DD'),
+              receipt,
+              boxList: { id: boxList.id } as BoxList, // <- asignar boxList antes del save
+            });
+  
+            await this.paymentHistoryOnAccountRepository.save(newPayment);
+          }
         }
+
+        
+        
     
-        receipt.boxList = { id: boxList.id } as BoxList;
         await queryRunner.manager.save(Receipt, receipt);
   
         await queryRunner.commitTransaction();
@@ -231,7 +275,7 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
       }
     }
     
-    async cancelReceipt(customerId: string) {
+    async cancelReceipt(receiptId: string, customerId: string) {
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
       await queryRunner.startTransaction();
@@ -239,6 +283,10 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
       try {
         const customerRepo = queryRunner.manager.getRepository(Customer);
         const receiptRepo = queryRunner.manager.getRepository(Receipt);
+        const receiptPaymentRepo = queryRunner.manager.getRepository(ReceiptPayment);
+        const paymentHistoryRepo = queryRunner.manager.getRepository(PaymentHistoryOnAccount);
+
+
     
         const customer = await customerRepo.findOne({
           where: { id: customerId },
@@ -248,37 +296,13 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
         if (!customer) {
           throw new NotFoundException('Customer not found');
         }
-    
-
-    
         
-    
-        const receipts = customer.receipts.sort(
-          (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
-        );
-    
-        const pendingReceipt = receipts.find((r) => r.status === 'PENDING');
+
         const lastPaidReceipt = await queryRunner.manager.findOne(Receipt, {
-          where: {
-            customer: { id: customer.id },
-            status: 'PAID',
-          },
-          order: {
-            dateNow: 'DESC',
-          },
+          where:{id:receiptId},
+          relations: ['payments', 'paymentHistoryOnAccount']
         });
-        customer.startDate = dayjs(lastPaidReceipt.startDate)
-        .format('YYYY-MM-DD');
-        
-        if (!customer.startDate) {
-          throw new BadRequestException('startDate is required to calculate previousStartDate');
-        }
-        
-        customer.previusStartDate = dayjs(lastPaidReceipt.startDate)
-          .subtract(1, 'month')
-          .format('YYYY-MM-DD');
 
-        await customerRepo.save(customer);
 
         if (!lastPaidReceipt) {
           throw new NotFoundException({
@@ -294,25 +318,46 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
         if (!boxList) {
           throw new NotFoundException('Box list not found');
         }
-    
-        if (lastPaidReceipt.paymentType === 'TRANSFER') {
-          boxList.totalPrice += 0;
-        } else {
-          boxList.totalPrice -= lastPaidReceipt.price;
+        if(lastPaidReceipt.payments.length > 0){
+          for(const payments of lastPaidReceipt.payments){
+  
+            if (payments.paymentType === 'TRANSFER') {
+              boxList.totalPrice += 0;
+            } else {
+              boxList.totalPrice -= payments.price;
+            }
+        
+            await this.boxListsService.updateBox(boxList.id, {
+              totalPrice: boxList.totalPrice,
+            }, queryRunner.manager);
+        
+          }
+          if(lastPaidReceipt.paymentHistoryOnAccount.length > 0)
+          
+          for(const historyPayments of lastPaidReceipt.paymentHistoryOnAccount){
+  
+            if (historyPayments.paymentType === 'TRANSFER') {
+              boxList.totalPrice += 0;
+            } else {
+              boxList.totalPrice -= historyPayments.price;
+            }
+        
+            await this.boxListsService.updateBox(boxList.id, {
+              totalPrice: boxList.totalPrice,
+            }, queryRunner.manager);
+        
+          }
         }
-    
-        await this.boxListsService.updateBox(boxList.id, {
-          totalPrice: boxList.totalPrice,
-        }, queryRunner.manager);
     
         lastPaidReceipt.status = 'PENDING';
         lastPaidReceipt.paymentDate = null;
-        lastPaidReceipt.boxList = null;
         lastPaidReceipt.paymentType = null;
+        lastPaidReceipt.price = lastPaidReceipt.startAmount;
 
     
-    
         await receiptRepo.save(lastPaidReceipt);
+        await receiptPaymentRepo.remove(lastPaidReceipt.payments);
+         await paymentHistoryRepo.remove(lastPaidReceipt.paymentHistoryOnAccount);
     
         await queryRunner.commitTransaction();
         return customer;
@@ -462,14 +507,24 @@ async createReceiptMan(dateNowFront: string, customerType: CustomerType): Promis
       }
     }
 
-    async getBarcodeReceipt(barcode: string){
+    async getBarcodeReceipt(barcode: string, manager: EntityManager):Promise<Receipt>{
+
       try{
-        const barcodeReceipt = await this.receiptRepository.findOne({where:{barcode:barcode}, relations:['customer']})
-        if(!barcodeReceipt){
-          this.logger.warn(`No se encontró el recibocon el código de barras: ${barcode}`);
+        const receipt = await manager.findOne(Receipt, {
+          where: { barcode },
+          relations: ['customer', 'paymentHistoryOnAccount'],
+        });
+
+        if (!receipt) {
+          this.logger.warn(`No se encontró el recibo con el código de barras: ${barcode}`);
           return null;
         }
-        return barcodeReceipt;
+
+        if (receipt.status === 'PAID') {
+          throw new BadRequestException('El recibo ya fue pagado');
+        }
+
+        return receipt;
       }catch (error) {
         if (!(error instanceof NotFoundException)) {
           this.logger.error(error.message, error.stack);
@@ -478,25 +533,17 @@ async createReceiptMan(dateNowFront: string, customerType: CustomerType): Promis
       }
     }
 
-    async createReceiptForDebt(customerId: string, monthDebt: string, price: number){
-        const qr = this.dataSource.createQueryRunner();
-        await qr.connect();
-        await qr.startTransaction();
+    async findReceipts(){
       try{
+        const receipts = await this.receiptRepository.find({relations: ['payments', 'customer','customer.vehicleRenters', 'customer.vehicleRenters.vehicle', 'customer.vehicleRenters.vehicle.customer']})
 
-        console.log(customerId)
-        console.log(monthDebt)
-        console.log(price)
-       await this.createReceipt(customerId, qr.manager, price, monthDebt);
-
+        return receipts;
       }catch (error) {
         if (!(error instanceof NotFoundException)) {
           this.logger.error(error.message, error.stack);
         }
         throw error;
-      }finally {
-      await qr.release();
-    }
+      }
     }
 
 }

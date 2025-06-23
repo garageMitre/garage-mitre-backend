@@ -3,6 +3,8 @@ import { TicketsService } from '../tickets/tickets.service';
 import { ScannerDto } from './dto/scanner.dto';
 import { ReceiptsService } from 'src/receipts/receipts.service';
 import { UpdateReceiptDto } from 'src/receipts/dto/update-receipt.dto';
+import { Receipt } from 'src/receipts/entities/receipt.entity';
+import { DataSource } from 'typeorm';
 
 @Injectable()
 export class ScannerService {
@@ -11,16 +13,21 @@ export class ScannerService {
 
   constructor(
     private readonly ticketsService: TicketsService,
-    private readonly receiptsService: ReceiptsService
+    private readonly receiptsService: ReceiptsService,
+    private readonly dataSource: DataSource,
+    
   ) {}
 
-  async start(scannerDto?: ScannerDto): Promise<{ success: boolean; message: string; type?: string; id?:string }> {
+  async start(scannerDto?: ScannerDto): Promise<{ success: boolean; message: string; type?: string; id?:string, barcode?: string, receipt?: Receipt, receiptId?: string }> {
     if (this.isScanning) {
       return { success: false, message: 'El escáner ya está en ejecución.' };
     }
   
     this.isScanning = true;
     this.logger.log(`Procesando código de barras: ${scannerDto?.barCode}`);
+      const queryRunner = this.dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
   
     try {
       const barCode = scannerDto?.barCode;
@@ -58,7 +65,8 @@ export class ScannerService {
         }
   
       } else {
-        const barcodeReceipt = await this.receiptsService.getBarcodeReceipt(barCode);
+        const barcodeReceipt = await this.receiptsService.getBarcodeReceipt(barCode, queryRunner.manager);
+
   
         if (!barcodeReceipt) {
           this.logger.warn(`No se encontró un recibo con el código: ${barCode}`);
@@ -68,13 +76,17 @@ export class ScannerService {
   
 
         this.isScanning = false;
+        await queryRunner.commitTransaction();
         if (barcodeReceipt) {
           this.logger.log('Busqueda del recibo existosa.');
           return {
             success: true,
             message: 'Busqueda del recibo exitosa.',
             type: 'RECEIPT',
-            id: barcodeReceipt.customer.id, // por si querés usarlo luego
+            id: barcodeReceipt.customer.id,
+            barcode: barcodeReceipt.barcode,
+            receipt: barcodeReceipt,
+            receiptId: barcodeReceipt.id
           };
           
         } else {
@@ -86,7 +98,9 @@ export class ScannerService {
       this.logger.error('Error al procesar el código de barras:', error);
       this.isScanning = false;
       return { success: false, message: 'Error al procesar el código de barras.' };
-    }
+    } finally {
+    await queryRunner.release();
+  }
   }
   
 }

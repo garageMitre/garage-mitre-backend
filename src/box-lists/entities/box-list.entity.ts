@@ -10,6 +10,8 @@ import {
 } from 'typeorm';
 import { OtherPayment } from './other-payment.entity';
 import { TicketRegistrationForDay } from 'src/tickets/entities/ticket-registration-for-day.entity';
+import { ReceiptPayment } from 'src/receipts/entities/receipt-payment.entity';
+import { PaymentHistoryOnAccount } from 'src/receipts/entities/payment-history-on-account.entity';
 
 @Entity({ name: 'box_lists' })
 export class BoxList {
@@ -33,6 +35,12 @@ export class BoxList {
 
   @OneToMany(() => Receipt, (receipts) => receipts.boxList)
   receipts: Receipt[];
+
+  @OneToMany(() => ReceiptPayment, (receiptPayments) => receiptPayments.boxList)
+  receiptPayments: ReceiptPayment[];
+
+  @OneToMany(() => PaymentHistoryOnAccount, (paymentHistoryOnAccount) => paymentHistoryOnAccount.boxList, { cascade: true, nullable: true })
+  paymentHistoryOnAccount: PaymentHistoryOnAccount[];
 
   @OneToMany(() => OtherPayment, (otherPayments) => otherPayments.boxList)
   otherPayments: OtherPayment[];

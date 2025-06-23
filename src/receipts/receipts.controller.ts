@@ -7,25 +7,33 @@ import { CustomerType } from 'src/customers/entities/customer.entity';
 export class ReceiptsController {
     constructor(private readonly receiptsService: ReceiptsService) {}
  
-    @Patch('customers/:customerId')
+    @Patch(':receiptId/customers/:customerId')
     async updateByOwner(
         @Param('customerId') customerId: string,
-        @Body() updateReceiptDto : UpdateReceiptDto
+        @Param('receiptId') receiptId: string,
+        @Body() updateReceiptDto : UpdateReceiptDto,
     ) {
-        return await this.receiptsService.updateReceipt(customerId, updateReceiptDto);
+        return await this.receiptsService.updateReceipt(receiptId, customerId, updateReceiptDto);
     }
 
-    @Patch('cancelReceipt/customers/:customerId')
+    @Patch('cancelReceipt/:receiptId/customers/:customerId')
     async cancelReceiptByOwner(
-        @Param('customerId') customerId: string
+        @Param('customerId') customerId: string,
+        @Param('receiptId') receiptId: string
     ) {
-        return await this.receiptsService.cancelReceipt(customerId);
+        return await this.receiptsService.cancelReceipt(receiptId, customerId);
     }
 
     @Get(':customerType')
     async findAllPendingReceipts( @Param('customerType') customer: CustomerType) {
         return await this.receiptsService.findAllPendingReceipts(customer);
     }
+
+    @Get()
+    async findReceipts() {
+        return await this.receiptsService.findReceipts();
+    }
+
 
   @Post('generate-manual/:customerType')
   async generateReceiptsManual(@Param('customerType') customer: CustomerType, @Body() body: { dateNow: string }) {

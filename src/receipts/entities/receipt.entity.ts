@@ -5,17 +5,20 @@ import {
   Entity,
   JoinColumn,
   ManyToOne,
+  OneToMany,
   OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { BoxList } from 'src/box-lists/entities/box-list.entity';
 import { Customer } from 'src/customers/entities/customer.entity';
+import { ReceiptPayment } from './receipt-payment.entity';
+import { PaymentHistoryOnAccount } from './payment-history-on-account.entity';
 
 export const PAYMENT_STATUS_TYPE = ['PENDING', 'PAID'] as const;
 export type PaymentStatusType = (typeof PAYMENT_STATUS_TYPE)[number];
 
-export const PAYMENT_TYPE = ['TRANSFER', 'CASH', 'CHECK'] as const;
+export const PAYMENT_TYPE = ['TRANSFER', 'CASH', 'CHECK', 'MIX'] as const;
 export type PaymentType = (typeof PAYMENT_TYPE)[number];
 
 @Entity({ name: 'receipts' })
@@ -59,6 +62,12 @@ export class Receipt {
 
   @ManyToOne(() => BoxList, (boxList) => boxList.receipts, {onDelete: 'CASCADE'})
   boxList: BoxList;
+
+  @OneToMany(() => ReceiptPayment, (payment) => payment.receipt, { cascade: true, nullable: true })
+  payments: ReceiptPayment[];
+
+  @OneToMany(() => PaymentHistoryOnAccount, (paymentHistoryOnAccount) => paymentHistoryOnAccount.receipt, { cascade: true, nullable: true })
+  paymentHistoryOnAccount: PaymentHistoryOnAccount[];
   
   @CreateDateColumn()
   createdAt: Date;
