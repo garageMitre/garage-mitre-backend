@@ -32,6 +32,11 @@ export class CustomersController {
     return await this.customersService.getCustomerVehicleRenter();
   }
 
+  @Get('thirds')
+  async getCustomerthird() {
+    return await this.customersService.getCustomerthird();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.customersService.findOne(id);
