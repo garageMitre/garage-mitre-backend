@@ -289,29 +289,6 @@ export class CustomersService {
               );
             }
           }
-
-    const customers = await this.customerRepository.find({
-      relations: ['receipts','receipts.payments','receipts.paymentHistoryOnAccount','vehicles','vehicles.parkingType','vehicleRenters', 'vehicles.vehicleRenters', 'vehicleRenters.customer',
-           'vehicleRenters.vehicle', 'vehicleRenters.vehicle.customer'],
-    });
-
-    const filteredCustomers = customers.filter(customer => {
-      const receipts = customer.receipts || [];
-
-      // Buscamos el recibo con la fecha más reciente
-      const latestReceipt = receipts
-        .filter(r => r.receiptTypeKey === 'GARAGE_MITRE')
-        .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
-
-      return !!latestReceipt;
-    });
-
-    for(const privateCustomer of filteredCustomers){
-      privateCustomer.customerType = 'PRIVATE'
-    }
-     await customerRepo.save(filteredCustomers);
-
-
     
         await queryRunner.commitTransaction();
         return savedCustomer;
