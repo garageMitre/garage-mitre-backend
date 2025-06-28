@@ -872,14 +872,14 @@ async findAll(customerType: CustomerType) {
       }
 
       await this.customerRepository.softDelete(customer.id);
-                            const start = '2025-07-01';
-            const end = '2025-07-31';
+            // const start = '2025-07-01';
+            // const end = '2025-07-31';
 
-            await this.receiptRepository.delete({
-              startDate: Between(start, end),
-            });
+            // await this.receiptRepository.delete({
+            //   startDate: Between(start, end),
+            // });
 
-            console.log(`Se eliminaron recibos de julio 2025`);
+            // console.log(`Se eliminaron recibos de julio 2025`);
 
       return {message: 'Customer removed successfully'}
     } catch (error) {
