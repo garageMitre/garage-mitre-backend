@@ -2,6 +2,7 @@ import { Allow, IsArray, IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, Is
 import { Type } from 'class-transformer';
 import { Customer, CUSTOMER_TYPE, CustomerType } from '../entities/customer.entity';
 import { Parking, PARKING_TYPE } from '../entities/parking-type.entity';
+import { PAYMENT_TYPE, PaymentType } from 'src/receipts/entities/receipt-payment.entity';
 
 export class CreateVehicleDto {
 
@@ -104,5 +105,9 @@ class MonthDebtDto {
   @IsNumber()
   @IsOptional()
   amount?: number; // Monto de la deuda para ese mes
+
+  @IsEnum(PAYMENT_TYPE)
+  @IsOptional()
+  paymentType: PaymentType;
 }
 

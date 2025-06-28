@@ -138,13 +138,11 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
 
         const receipt = !updateReceiptDto.barcode
           ? await queryRunner.manager.findOne(Receipt, {
-              where: { id: receiptId }, // si necesitás esa relación
+              where: { id: receiptId }, 
             })
           : await queryRunner.manager.findOne(Receipt, {
               where: { barcode: updateReceiptDto.barcode},
             })
-
-
 
 
         if (!receipt) throw new NotFoundException('Receipt not found');
@@ -154,7 +152,7 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
     
         const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
     
-        await queryRunner.manager.save(Customer, customer);
+        
     
         if (updateReceiptDto.print) {
 
@@ -203,6 +201,7 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
           }
           receipt.status = 'PAID';
           receipt.paymentDate = argentinaTime.format('YYYY-MM-DD');
+
         }else{
 
           if(updateReceiptDto.payments.length > 0){
@@ -257,9 +256,39 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
           }
         }
 
+
+        if (customer.monthsDebt && Array.isArray(customer.monthsDebt)) {
+          const receiptMonth = receipt.startDate.slice(0, 7);
+
+          // Actualizo status a PAID para el mes que coincide con el recibo pagado
+          customer.monthsDebt = customer.monthsDebt.map(debt => {
+            const debtMonth = debt.month.slice(0, 7);
+            if (debtMonth === receiptMonth && receipt.status === 'PAID') {
+              return { ...debt, status: 'PAID' };
+            }
+            return debt;
+          });
+
+          // Verifico si hay meses sin pagar (sin status PAID)
+          const unpaidMonths = customer.monthsDebt.filter(debt => {
+            const debtMonth = debt.month.slice(0, 7);
+            // Considero un mes pagado si tiene status PAID o si en receipts existe un recibo pagado para ese mes
+            const hasPaidReceipt = debt.status === 'PAID' || customer.receipts?.some(r => {
+              const rMonth = r.startDate.slice(0, 7);
+              return rMonth === debtMonth && r.status === 'PAID';
+            });
+            return !hasPaidReceipt;
+          });
+
+          customer.hasDebt = unpaidMonths.length > 0;
+
+          await this.customerRepository.save(customer);
+        }
+
+
+
+
         
-        
-    
         await queryRunner.manager.save(Receipt, receipt);
   
         await queryRunner.commitTransaction();
@@ -358,6 +387,22 @@ async createReceipt(customerId: string, manager: EntityManager, price?: number, 
         await receiptRepo.save(lastPaidReceipt);
         await receiptPaymentRepo.remove(lastPaidReceipt.payments);
          await paymentHistoryRepo.remove(lastPaidReceipt.paymentHistoryOnAccount);
+
+        if (customer.monthsDebt && Array.isArray(customer.monthsDebt)) {
+          const receiptMonth = lastPaidReceipt.startDate.slice(0, 7);
+
+          customer.monthsDebt = customer.monthsDebt.map(debt => {
+            const debtMonth = debt.month.slice(0, 7);
+            if (debtMonth === receiptMonth && lastPaidReceipt.status === 'PENDING') {
+              return { ...debt, status: 'PENDING' };
+            }
+            return debt;
+          });
+
+          customer.hasDebt = true;
+
+          await this.customerRepository.save(customer);
+        }
     
         await queryRunner.commitTransaction();
         return customer;
@@ -539,6 +584,52 @@ async createReceiptMan(dateNowFront: string, customerType: CustomerType): Promis
 
         return receipts;
       }catch (error) {
+        if (!(error instanceof NotFoundException)) {
+          this.logger.error(error.message, error.stack);
+        }
+        throw error;
+      }
+    }
+
+    async deleteReceipt(receiptId: string) {
+      try {
+        const receipt = await this.receiptRepository.findOne({
+          where: { id: receiptId },
+          relations: ['customer'],
+        });
+
+        if (!receipt) {
+          throw new NotFoundException(`Receipt with id ${receiptId} not found`);
+        }
+
+        if(receipt.status === 'PAID'){
+          throw new BadRequestException({
+            code: 'RECEIPT_ALREADY_PAID_FOR_DELETE',
+            message: `El recibo ya esta pagado, por favor cancele el recibo antes de eliminarlo`,
+          });
+        }
+
+        const customer = receipt.customer;
+
+        if (customer.monthsDebt && Array.isArray(customer.monthsDebt)) {
+          const receiptMonth = receipt.startDate.slice(0, 7);
+
+          customer.monthsDebt = customer.monthsDebt.filter((debt) => {
+            const debtMonth = debt.month.slice(0, 7); 
+            return debtMonth !== receiptMonth;
+          });
+
+          if(customer.monthsDebt.length === 0){
+            customer.hasDebt = false;
+          }
+
+          await this.customerRepository.save(customer);
+        }
+
+        await this.receiptRepository.remove(receipt); 
+
+        return { message: 'Recibo eliminado correctamente' };
+      } catch (error) {
         if (!(error instanceof NotFoundException)) {
           this.logger.error(error.message, error.stack);
         }

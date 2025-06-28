@@ -7,7 +7,7 @@ import { Customer, CustomerType } from './entities/customer.entity';
 import { ReceiptsService } from 'src/receipts/receipts.service';
 import { addMonths, startOfMonth } from 'date-fns';
 import { FilterOperator, paginate, Paginated, PaginateQuery } from 'nestjs-paginate';
-import { Receipt } from 'src/receipts/entities/receipt.entity';
+import { PaymentStatusType, Receipt } from 'src/receipts/entities/receipt.entity';
 import { Vehicle } from './entities/vehicle.entity';
 import { InterestSettings } from './entities/interest-setting.entity';
 import { CreateInterestSettingDto } from './dto/interest-setting.dto';
@@ -277,6 +277,15 @@ export class CustomersService {
                 throw new BadRequestException('Cada elemento en monthsDebt debe tener un mes válido');
               }
             }
+              const monthsDebtWithStatus = parsedMonthsDebt.map(debt => ({
+                month: debt.month,
+                amount: debt.amount,
+                status: 'PENDING' as PaymentStatusType, // asumiendo que PaymentStatusType es un enum o tipo string
+              }));
+
+              // Ahora guardás este array en el cliente (save/update)
+              savedCustomer.monthsDebt = monthsDebtWithStatus;
+              await queryRunner.manager.save(savedCustomer);
 
             for (const debt of parsedMonthsDebt) {
 
@@ -735,10 +744,14 @@ async findAll(customerType: CustomerType) {
         updateCustomerDto.hasDebt &&
         JSON.stringify(updateCustomerDto.monthsDebt) !== JSON.stringify(oldMonthsDebtCustoemr)
       ) {
-        const newMonthsDebt = Array.isArray(updateCustomerDto.monthsDebt)
+        let newMonthsDebt = Array.isArray(updateCustomerDto.monthsDebt)
           ? updateCustomerDto.monthsDebt
           : JSON.parse(updateCustomerDto.monthsDebt);
-
+          
+        newMonthsDebt = newMonthsDebt.map(debt => ({
+          ...debt,
+          status: debt.status ?? "PENDING",
+        }));
 
         const receiptRepoTxn = queryRunner.manager.getRepository(Receipt);
 

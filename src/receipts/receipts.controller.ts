@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, Body, Patch, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Post, Body, Patch, UseGuards, Delete } from '@nestjs/common';
 import { ReceiptsService } from './receipts.service';
 import { UpdateReceiptDto } from './dto/update-receipt.dto';
 import { CustomerType } from 'src/customers/entities/customer.entity';
@@ -49,4 +49,11 @@ export class ReceiptsController {
       message: `Recibos generados (si faltaban) para el mes de ${dateNow}`,
     };
   }
+
+  @Delete(':receiptId')
+    async deleteReceipt(
+        @Param('receiptId') receiptId: string
+    ) {
+        return await this.receiptsService.deleteReceipt(receiptId);
+    }
 }

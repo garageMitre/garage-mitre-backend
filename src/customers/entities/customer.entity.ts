@@ -11,7 +11,7 @@ import {
     PrimaryGeneratedColumn,
     UpdateDateColumn,
   } from 'typeorm';
-import { Receipt } from 'src/receipts/entities/receipt.entity';
+import { PaymentStatusType, Receipt } from 'src/receipts/entities/receipt.entity';
 import { Vehicle } from './vehicle.entity';
 import { VehicleRenter } from './vehicle-renter.entity';
 
@@ -57,6 +57,7 @@ export type CustomerType = (typeof CUSTOMER_TYPE)[number];
     monthsDebt?: {
       month: string;
       amount?: number;
+      status?: PaymentStatusType;
     }[];
 
     @OneToMany(() => Vehicle, (vehicle) => vehicle.customer, { cascade: true})
