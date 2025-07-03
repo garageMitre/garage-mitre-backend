@@ -79,14 +79,7 @@ export class CustomersService {
         ];
 
     
-        const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
-        // const nextMonthStartDate = argentinaTime
-        // .startOf('month')
-        // .add(1, 'day') 
-        // .tz('America/Argentina/Buenos_Aires')
-        // .format('YYYY-MM-DD');
 
-        // customer.startDate = nextMonthStartDate;
         const savedCustomer = await customerRepo.save(customer);
 
 
@@ -285,7 +278,13 @@ export class CustomersService {
 
               // Ahora guardás este array en el cliente (save/update)
               savedCustomer.monthsDebt = monthsDebtWithStatus;
-              await queryRunner.manager.save(savedCustomer);
+              if (vehicles.length > 0) {
+                savedCustomer.vehicles = vehicles;
+              }
+              if (vehiclesRenter.length > 0) {
+                savedCustomer.vehicleRenters = vehiclesRenter;
+              }
+              await customerRepo.save(savedCustomer);
 
             for (const debt of parsedMonthsDebt) {
 
@@ -483,13 +482,14 @@ async findAll(customerType: CustomerType) {
         if (customer.customerType === 'OWNER') {
           const existingVehicles = await vehicleRepo.find({
             where: { customer: { id: customer.id } },
-            relations: ['vehicleRenters'],
+            relations: ['vehicleRenters', 'vehicleRenters.customer', 'vehicleRenters.customer.receipts'],
           });
           
           // Crear el mapa para lookup rápido por id
           const existingVehiclesMap = new Map(
             existingVehicles.map((vehicle) => [vehicle.id, vehicle]),
           );
+          
           
           for (const vehicleDto of updateCustomerDto.vehicles) {
             if (!vehicleDto.id) {
@@ -599,6 +599,35 @@ async findAll(customerType: CustomerType) {
                           el garage del inquilino relacionado`,
               });
             }
+              const pendingReceipts: Receipt[] = [];
+
+              if(oldVehicle.vehicleRenters){
+                for (const vehicleRenter of oldVehicle.vehicleRenters) {
+                  const customer = vehicleRenter.customer;
+  
+                  // Convertir monthsDebt a array de fechas YYYY-MM para comparar
+                  const monthsDebt = (customer.monthsDebt || []).map((debt) =>
+                    debt.month.slice(0, 7)
+                  );
+  
+                  for (const receipt of customer.receipts) {
+                    const receiptMonth = receipt.startDate.slice(0, 7);
+  
+                    const isInDebtList = monthsDebt.includes(receiptMonth);
+  
+                    if (receipt.status === 'PENDING' && !isInDebtList) {
+                      pendingReceipts.push(receipt);
+                    }
+                  }
+                }
+  
+                for(const receipt of pendingReceipts){
+                  receipt.price = vehicleDto.amountRenter
+                  await queryRunner.manager.save(Receipt, receipt);
+                }
+              }
+
+            
           
             const newVehicle = queryRunner.manager.create(Vehicle, {
               garageNumber: vehicleDto.garageNumber,
