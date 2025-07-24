@@ -256,8 +256,10 @@ async createBox(createBoxListDto: CreateBoxListDto) {
 
     async removeOtherPayment(id: string) {
     try{
-      const expense = await this.otherPaymentepository.findOne({where:{id:id}})
+      const expense = await this.otherPaymentepository.findOne({where:{id:id},relations:['boxList']})
 
+      expense.boxList.totalPrice += expense.price;
+      await this.boxListRepository.save(expense.boxList);
       if(!expense){
         throw new NotFoundException('Expense not found')
       }
