@@ -592,11 +592,11 @@ async findAll(customerType: CustomerType) {
               });
             }
           
-            if (oldVehicle.rent === true && vehicleDto.rent === false && oldVehicle.vehicleRenters.length > 0) {
+            if (oldVehicle.rent === true && vehicleDto.rent === false && oldVehicle.vehicleRenters.length > 0 && oldVehicle.vehicleRenters !== null) {
               throw new NotFoundException({
                 code: 'CUSTOMER_RENTER_RELATIONSHIP',
                 message: `El vehiculo del garage (${oldVehicle.garageNumber}) ya tiene un inquilino relacionado. Porfavor si desea cambiar esta opcion cambie
-                          el garage del inquilino relacionado`,
+                          el garage del inquilino de tercero relacionado o elimine al iniquilino de tercero`,
               });
             }
               const pendingReceipts: Receipt[] = [];
@@ -830,52 +830,50 @@ async findAll(customerType: CustomerType) {
   }
   
   async remove(id: string) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+  
     try {
       const customer = await this.customerRepository.findOne({
         where: { id },
         withDeleted: true,
-        relations: [
-          'vehicleRenters',
-          'vehicleRenters.vehicle',
-          'vehicleRenters.vehicle.customer',
-          'vehicles',
-        ],
+        relations: ['vehicleRenters', 'vehicleRenters.vehicle', 'vehicles'],
       });
   
       if (!customer) {
-        throw new NotFoundException(`Customer not found`);
+        throw new NotFoundException('Customer not found');
       }
   
-      if (customer.customerType === 'RENTER') {
-        for (const vehicleRenter of customer.vehicleRenters) {
-          if (vehicleRenter.vehicle) {
-            vehicleRenter.vehicle.rentActive = false;
-            await this.vehicleRepository.save(vehicleRenter.vehicle);
-          }
-        }
+      // Primero marcamos todos los vehículos como no activos
+      const vehicleIdsToUpdate = customer.vehicleRenters
+        .filter(vr => vr.vehicle)
+        .map(vr => vr.vehicle.id);
+  
+      if (vehicleIdsToUpdate.length) {
+        await queryRunner.manager.update(
+          this.vehicleRepository.target,
+          vehicleIdsToUpdate.map(id => ({ id })), // UPDATE múltiple
+          { rentActive: false },
+        );
       }
   
-      await this.customerRepository.remove(customer);
+      // Ahora sí eliminamos el customer (hard delete)
+      await queryRunner.manager.remove(this.customerRepository.target, customer);
+  
+      await queryRunner.commitTransaction();
   
       return { message: 'Customer removed successfully' };
     } catch (error) {
-      if (error instanceof QueryFailedError) {
-        // Controlar error de Foreign Key
-        const message = (error as any).message || '';
-        if (message.includes('violates foreign key constraint')) {
-          throw new BadRequestException({
-            code: 'FOREIGN_KEY_VIOLATION',
-            message: 'No se puede eliminar el cliente porque existen relaciones activa/s con inqulino/s.',
-          });
-        }
-      }
-  
-      if (!(error instanceof NotFoundException) || !(error instanceof BadRequestException)) {
-        this.logger.error(error.message, error.stack);
-      }
+      await queryRunner.rollbackTransaction();
+      this.logger.error(error.message, error.stack);
       throw error;
+    } finally {
+      await queryRunner.release();
     }
   }
+  
+
   async softDelete(id: string) {
     try{
       const customer = await this.customerRepository.findOne({
