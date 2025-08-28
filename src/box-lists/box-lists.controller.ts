@@ -16,6 +16,12 @@ export class BoxListsController {
     return await this.boxListsService.createBox(createBoxListDto);
   }
 
+  @Delete('otherPayment/:id')
+  async removeOtherPayment(@Param('id') id: string) {
+    return await this.boxListsService.removeOtherPayment(id);
+  }
+
+
   @Get()
   async getAllboxes() {
       return await this.boxListsService.getAllboxes();
@@ -64,10 +70,6 @@ export class BoxListsController {
     return await this.boxListsService.updateOtherPayment(id, updateOtherPaymentDto);
   }
 
-  @Delete('otherPayment/:id')
-  async removeBox(@Param('id') id: string) {
-    return await this.boxListsService.removeBox(id);
-  }
 
 
 }
