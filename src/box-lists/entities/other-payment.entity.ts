@@ -11,6 +11,9 @@ import {
 } from 'typeorm';
 import { BoxList } from './box-list.entity';
 
+export const PAYMENT_TYPE = ['EGRESOS', 'INGRESOS'] as const;
+export type PaymentType = (typeof PAYMENT_TYPE)[number];
+
 @Entity({ name: 'other_payments' })
 export class OtherPayment {
   @PrimaryGeneratedColumn('uuid')
@@ -21,6 +24,9 @@ export class OtherPayment {
 
   @Column('int')
   price: number;
+
+  @Column('enum', { enum: PAYMENT_TYPE, })
+  type: PaymentType;
 
   @Column('date', { nullable: true })
   dateNow: string | null;

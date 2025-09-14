@@ -49,6 +49,10 @@ export class CreateVehicleRenterDto {
   @IsOptional()
   amount: number;
 
+  @Allow()
+  @IsOptional()
+  newOwner?: string;
+
 }
 
 export class UpdateCustomerDto {

@@ -198,10 +198,10 @@ async createBox(createBoxListDto: CreateBoxListDto) {
       if (!boxList) {
           boxList = await this.createBox({
               date: boxListDate,
-              totalPrice: -otherPayment.price
+              totalPrice: createOtherPaymentDto.type === 'EGRESOS' ? -otherPayment.price : otherPayment.price
           });
       } else {
-          boxList.totalPrice -= otherPayment.price;
+        boxList.totalPrice += createOtherPaymentDto.type === 'EGRESOS' ? -otherPayment.price : otherPayment.price;
       
           await this.updateBox(boxList.id, {
               totalPrice: boxList.totalPrice,

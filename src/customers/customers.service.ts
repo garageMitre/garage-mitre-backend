@@ -373,6 +373,7 @@ async findAll(customerType: CustomerType) {
     await queryRunner.startTransaction();
   
     try {
+
       
       const customerRepo = queryRunner.manager.getRepository(Customer);
       const vehicleRepo = queryRunner.manager.getRepository(Vehicle);
@@ -478,6 +479,8 @@ async findAll(customerType: CustomerType) {
       ) {
         const vehicles = [];
         const vehiclesRenter = [];
+
+        
       
         if (customer.customerType === 'OWNER') {
           const existingVehicles = await vehicleRepo.find({
@@ -1257,7 +1260,7 @@ async getCustomerVehicleRenter() {
       where: {
         rent: true,
       },
-      relations: ['customer'],
+      relations: ['customer', 'vehicleRenters', 'vehicleRenters.customer'],
     });
 
     return vehicles;
@@ -1288,6 +1291,33 @@ async getCustomerthird() {
     });
 
     return filteredCustomers;
+  } catch (error) {
+    if (!(error instanceof NotFoundException)) {
+      this.logger.error(error.message, error.stack);
+    }
+    throw error;
+  }
+}
+
+async changeCustomerOwner(vechileRenterId: string, newVehicleId: string){
+  try{
+    const vechileRenterPrivate = await this.vehicleRenterRepository.findOne({
+      where: { id: vechileRenterId },
+      relations: ['customer', 'vehicle'],
+    })
+
+    vechileRenterPrivate.vehicle.rentActive = false;
+    await this.vehicleRepository.save(vechileRenterPrivate.vehicle)
+
+    const vechileNewOwner = await this.vehicleRepository.findOne({
+      where: { id: newVehicleId },
+      relations: ['customer'],
+    });
+
+    vechileRenterPrivate.owner = vechileNewOwner.customer.id;
+    vechileRenterPrivate.vehicle = vechileNewOwner;
+    vechileRenterPrivate.garageNumber = vechileNewOwner.garageNumber;
+    await this.vehicleRenterRepository.save(vechileRenterPrivate);
   } catch (error) {
     if (!(error instanceof NotFoundException)) {
       this.logger.error(error.message, error.stack);
