@@ -25,7 +25,7 @@ export class OtherPayment {
   @Column('int')
   price: number;
 
-  @Column('enum', { enum: PAYMENT_TYPE, })
+  @Column('enum', { enum: PAYMENT_TYPE, nullable: true})
   type: PaymentType;
 
   @Column('date', { nullable: true })
