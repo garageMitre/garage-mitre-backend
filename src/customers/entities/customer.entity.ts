@@ -60,6 +60,9 @@ export type CustomerType = (typeof CUSTOMER_TYPE)[number];
       status?: PaymentStatusType;
     }[];
 
+    @Column('int', { default: 0 })
+    credit: number;
+
     @OneToMany(() => Vehicle, (vehicle) => vehicle.customer, { cascade: true})
     vehicles: Vehicle[];
 

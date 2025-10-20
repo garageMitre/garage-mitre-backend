@@ -2,7 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 't
 import { Receipt } from './receipt.entity';
 import { BoxList } from 'src/box-lists/entities/box-list.entity';
 
-export const PAYMENT_TYPE = ['TRANSFER', 'CASH', 'CHECK'] as const;
+export const PAYMENT_TYPE = ['TRANSFER', 'CASH', 'CHECK', 'CREDIT'] as const;
 export type PaymentType = (typeof PAYMENT_TYPE)[number];
 
 @Entity({ name: 'receipt_payments' })

@@ -85,6 +85,9 @@ export class CreateCustomerDto {
   @Type(() => MonthDebtDto)
   monthsDebt?: MonthDebtDto[];
 
+  @IsNumber()
+  credit: number;
+
   @IsArray()
   @ValidateNested({ each: true }) // Validar cada vehículo individualmente
   @Type(() => CreateVehicleDto)

@@ -18,7 +18,7 @@ import { PaymentHistoryOnAccount } from './payment-history-on-account.entity';
 export const PAYMENT_STATUS_TYPE = ['PENDING', 'PAID'] as const;
 export type PaymentStatusType = (typeof PAYMENT_STATUS_TYPE)[number];
 
-export const PAYMENT_TYPE = ['TRANSFER', 'CASH', 'CHECK', 'MIX'] as const;
+export const PAYMENT_TYPE = ['TRANSFER', 'CASH', 'CHECK', 'MIX', 'CREDIT'] as const;
 export type PaymentType = (typeof PAYMENT_TYPE)[number];
 
 @Entity({ name: 'receipts' })
