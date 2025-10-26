@@ -268,21 +268,14 @@ async updateReceipt(
       if (lastOwnerPendingReceipt) {
         lastOwnerPendingReceipt.status = 'PAID';
         lastOwnerPendingReceipt.paymentDate = now;
-        lastOwnerPendingReceipt.paymentType = 'TRANSFER';
         
         let boxList = await this.boxListsService.findBoxByDate(now, queryRunner.manager);
         await queryRunner.manager.save(lastOwnerPendingReceipt);
-        boxList.totalPrice -= lastOwnerPendingReceipt.price;
-      await this.boxListsService.updateBox(
-        boxList.id,
-        { totalPrice: boxList.totalPrice },
-        queryRunner.manager
-      );
       const newPayment = this.receiptPaymentRepository.create({
         paymentType: 'TP',
         price: lastOwnerPendingReceipt.price,
         paymentDate: now,
-        receipt,
+        receipt: lastOwnerPendingReceipt, 
         boxList: { id: boxList.id } as BoxList,
       });
       await this.receiptPaymentRepository.save(newPayment);
@@ -457,7 +450,10 @@ async cancelReceipt(receiptId: string, customerId: string) {
           creditToRefund += payment.price ?? 0;
         }
 
-        if (payment.paymentType !== 'TRANSFER') {
+        if (
+          payment.paymentType !== 'TRANSFER' &&
+          payment.paymentType !== 'TP'
+        ) {
           boxList.totalPrice -= payment.price;
           await this.boxListsService.updateBox(
             boxList.id,
@@ -465,6 +461,7 @@ async cancelReceipt(receiptId: string, customerId: string) {
             queryRunner.manager
           );
         }
+        
       }
     }
 
@@ -477,7 +474,10 @@ async cancelReceipt(receiptId: string, customerId: string) {
           creditToRefund += historyPayment.price ?? 0;
         }
 
-        if (historyPayment.paymentType !== 'TRANSFER') {
+        if (
+          historyPayment.paymentType !== 'TRANSFER' &&
+          historyPayment.paymentType !== 'TP'
+        ) {
           boxList.totalPrice -= historyPayment.price;
           await this.boxListsService.updateBox(
             boxList.id,
@@ -485,6 +485,7 @@ async cancelReceipt(receiptId: string, customerId: string) {
             queryRunner.manager
           );
         }
+        
       }
     }
 
