@@ -171,7 +171,7 @@ async updateReceipt(
       if (owner) {
         lastOwnerPendingReceipt = await queryRunner.manager.findOne(Receipt, {
           where: { customer: { id: owner.id }, status: 'PENDING' },
-          order: { createdAt: 'DESC' },
+          order: { createdAt: 'ASC' },
         });
       }
     }
