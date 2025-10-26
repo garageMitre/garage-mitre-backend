@@ -131,6 +131,9 @@ async updateReceipt(
   await queryRunner.startTransaction();
 
   try {
+    // =========================================================
+    // 🧍 Buscar CUSTOMER y RECEIPT
+    // =========================================================
     const customer = await queryRunner.manager.findOne(Customer, {
       where: { id: customerId },
       relations: ['receipts'],
@@ -146,6 +149,33 @@ async updateReceipt(
 
     const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
     const now = argentinaTime.format('YYYY-MM-DD');
+
+    // =========================================================
+    // 🧭 Buscar último recibo pendiente del OWNER si el customer es PRIVATE
+    // =========================================================
+    let lastOwnerPendingReceipt: Receipt | null = null;
+
+    if (customer.customerType === 'PRIVATE') {
+      // 👇 Traigo el receipt con las relaciones necesarias para llegar al owner
+      const receiptWithRelations = await queryRunner.manager.findOne(Receipt, {
+        where: { id: receipt.id },
+        relations: [
+          'customer',
+          'customer.vehicleRenters',
+          'customer.vehicleRenters.vehicle',
+          'customer.vehicleRenters.vehicle.customer'
+        ],
+      });
+    
+      const owner = receiptWithRelations?.customer?.vehicleRenters?.[0]?.vehicle?.customer;
+      if (owner) {
+        lastOwnerPendingReceipt = await queryRunner.manager.findOne(Receipt, {
+          where: { customer: { id: owner.id }, status: 'PENDING' },
+          order: { createdAt: 'DESC' },
+        });
+      }
+    }
+
 
     // =========================================================
     // 🧾 PAGOS MANUALES (efectivo / crédito)
@@ -172,19 +202,21 @@ async updateReceipt(
 
           const newCredit = customer.credit - creditToApply;
           const newReceiptPrice = receipt.price - creditToApply;
+
           let boxList = await this.boxListsService.findBoxByDate(now, queryRunner.manager);
           if (!boxList) {
             boxList = await this.boxListsService.createBox({
               date: now,
-              totalPrice: 0, // 👈 Crédito no suma al total en caja
+              totalPrice: 0,
             });
           }
+
           const creditPayment = this.receiptPaymentRepository.create({
             paymentType: 'CREDIT' as any,
             price: creditToApply,
             paymentDate: now,
             receipt,
-            boxList: { id: boxList.id } as BoxList, 
+            boxList: { id: boxList.id } as BoxList,
           });
           await this.receiptPaymentRepository.save(creditPayment);
           await queryRunner.manager.update(Customer, { id: customer.id }, { credit: newCredit });
@@ -231,6 +263,30 @@ async updateReceipt(
           receipt.paymentDate = now;
         }
       }
+
+      // ✅ Si hay recibo OWNER pendiente, también se paga
+      if (lastOwnerPendingReceipt) {
+        lastOwnerPendingReceipt.status = 'PAID';
+        lastOwnerPendingReceipt.paymentDate = now;
+        lastOwnerPendingReceipt.paymentType = 'TRANSFER';
+        
+        let boxList = await this.boxListsService.findBoxByDate(now, queryRunner.manager);
+        await queryRunner.manager.save(lastOwnerPendingReceipt);
+        boxList.totalPrice -= lastOwnerPendingReceipt.price;
+      await this.boxListsService.updateBox(
+        boxList.id,
+        { totalPrice: boxList.totalPrice },
+        queryRunner.manager
+      );
+      const newPayment = this.receiptPaymentRepository.create({
+        paymentType: 'TP',
+        price: lastOwnerPendingReceipt.price,
+        paymentDate: now,
+        receipt,
+        boxList: { id: boxList.id } as BoxList,
+      });
+      await this.receiptPaymentRepository.save(newPayment);
+      }
     }
 
     // =========================================================
@@ -246,6 +302,11 @@ async updateReceipt(
 
       if (totalOnAccount > receipt.price) {
         throw new BadRequestException('El monto a cuenta no puede superar el saldo del recibo.');
+      }
+
+      if (lastOwnerPendingReceipt) {
+        lastOwnerPendingReceipt.price = lastOwnerPendingReceipt.price - totalOnAccount;
+        await queryRunner.manager.save(lastOwnerPendingReceipt);
       }
 
       for (const payment of updateReceiptDto.payments) {
@@ -279,8 +340,6 @@ async updateReceipt(
         await this.receiptPaymentRepository.save(paymentOnAccount);
       }
 
-      // ✅ Si el pago a cuenta NO cubre todo → restar
-      // ❌ Si cubre todo → NO tocar el precio
       if (totalOnAccount < receipt.price) {
         receipt.price -= totalOnAccount;
       }
@@ -340,6 +399,7 @@ async updateReceipt(
     await queryRunner.release();
   }
 }
+
 
 async cancelReceipt(receiptId: string, customerId: string) {
   const queryRunner = this.dataSource.createQueryRunner();
