@@ -367,23 +367,25 @@ async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRe
       }
     }
 
-
-    let boxList = await this.boxListsService.findBoxByDate(now);
-
-    if (!boxList) {
-        boxList = await this.boxListsService.createBox({
-            date: now,
-            totalPrice: ticket.price
-        });
-    } else {
-        boxList.totalPrice += ticket.price;
-
-        await this.boxListsService.updateBox(boxList.id, {
-            totalPrice: boxList.totalPrice,
-        });
+    if(createTicketRegistrationForDayDto.paid){
+      let boxList = await this.boxListsService.findBoxByDate(now);
+  
+      if (!boxList) {
+          boxList = await this.boxListsService.createBox({
+              date: now,
+              totalPrice: ticket.price
+          });
+      } else {
+          boxList.totalPrice += ticket.price;
+  
+          await this.boxListsService.updateBox(boxList.id, {
+              totalPrice: boxList.totalPrice,
+          });
+      }
+  
+      ticket.boxList = { id: boxList.id } as BoxList;
+      
     }
-
-    ticket.boxList = { id: boxList.id } as BoxList;
     const savedTicket = await this.ticketRegistrationForDayRepository.save(ticket);
     return savedTicket;
   } catch (error) {
@@ -421,6 +423,38 @@ async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRe
     if (dto.retired !== undefined) {
       ticket.retired = dto.retired;
     }
+    const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
+
+    const now = argentinaTime.format('YYYY-MM-DD')
+
+    if(!dto.paid){
+      let boxList = await this.boxListsService.findBoxByDate(now);
+          boxList.totalPrice -= ticket.price;
+  
+          await this.boxListsService.updateBox(boxList.id, {
+              totalPrice: boxList.totalPrice,
+          });
+     ticket.boxList = null;
+
+    }else{
+      let boxList = await this.boxListsService.findBoxByDate(now);
+  
+      if (!boxList) {
+          boxList = await this.boxListsService.createBox({
+              date: now,
+              totalPrice: ticket.price
+          });
+      } else {
+          boxList.totalPrice += ticket.price;
+  
+          await this.boxListsService.updateBox(boxList.id, {
+              totalPrice: boxList.totalPrice,
+          });
+      }
+      ticket.boxList = { id: boxList.id } as BoxList;
+
+    }
+
 
     return this.ticketRegistrationForDayRepository.save(ticket);
   }

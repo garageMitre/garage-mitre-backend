@@ -454,7 +454,6 @@ async cancelReceipt(receiptId: string, customerId: string) {
           payment.paymentType !== 'TRANSFER' &&
           payment.paymentType !== 'TP'
         ) {
-          boxList.totalPrice -= payment.price;
           await this.boxListsService.updateBox(
             boxList.id,
             { totalPrice: boxList.totalPrice },

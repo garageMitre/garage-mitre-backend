@@ -241,18 +241,21 @@ async createBox(createBoxListDto: CreateBoxListDto) {
       this.logger.error(error.message, error.stack);
     }
   }
-
-    async findAllOtherPayment(){
-      try {
-        const expenses = await this.otherPaymentepository.find({
-          relations: ['boxList',],
-        })
+  async findAllOtherPayment() {
+    try {
+      const expenses = await this.otherPaymentepository.find({
+        relations: ['boxList'],
+        order: {
+          dateNow: 'DESC',  // 👈 Cambiado a descendente
+        },
+      });
   
-          return expenses;
-      } catch (error) {
-        this.logger.error(error.message, error.stack);
-      }
+      return expenses;
+    } catch (error) {
+      this.logger.error(error.message, error.stack);
     }
+  }
+  
 
     async removeOtherPayment(id: string) {
     try{
