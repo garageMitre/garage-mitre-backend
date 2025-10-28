@@ -458,7 +458,7 @@ async cancelReceipt(receiptId: string, customerId: string) {
             queryRunner.manager
           );
         }
-    
+  
 
         if (
           payment.paymentType !== 'TRANSFER' &&
