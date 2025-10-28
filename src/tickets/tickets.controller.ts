@@ -31,8 +31,8 @@ export class TicketsController {
     return this.ticketsService.findAll(query);
   }
   @Get('registrationForDays')
-  findAllRegistrationForDay(@Paginate() query: PaginateQuery): Promise<Paginated<TicketRegistrationForDay>> {
-    return this.ticketsService.findAllRegistrationForDay(query);
+  findAllRegistrationForDay() {
+    return this.ticketsService.findAllRegistrationForDay();
   }
 
   @Patch(':id')

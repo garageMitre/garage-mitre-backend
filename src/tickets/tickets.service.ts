@@ -391,17 +391,10 @@ async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRe
   }
 }
 
-    async findAllRegistrationForDay(query: PaginateQuery): Promise<Paginated<TicketRegistrationForDay>> {
+    async findAllRegistrationForDay() {
       try {
-        return await paginate(query, this.ticketRegistrationForDayRepository, {
-          sortableColumns: ['id'],
-          nullSort: 'last',
-          searchableColumns: ['firstNameCustomer', 'lastNameCustomer'],
-          filterableColumns: {
-            firstNameCustomer: [FilterOperator.ILIKE, FilterOperator.EQ],
-            lastNameCustomer: [FilterOperator.EQ, FilterOperator.ILIKE],
-          },
-        });
+        const ticketsDays = await this.ticketRegistrationForDayRepository.find()
+        return ticketsDays;
       } catch (error) {
         this.logger.error(error.message, error.stack);
       }
