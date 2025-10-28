@@ -450,10 +450,26 @@ async cancelReceipt(receiptId: string, customerId: string) {
           creditToRefund += payment.price ?? 0;
         }
 
+        if (payment.paymentType === 'CASH') {
+          boxList.totalPrice -= payment.price ?? 0;
+          await this.boxListsService.updateBox(
+            boxList.id,
+            { totalPrice: boxList.totalPrice },
+            queryRunner.manager
+          );
+        }
+    
+
         if (
           payment.paymentType !== 'TRANSFER' &&
           payment.paymentType !== 'TP'
         ) {
+          await this.boxListsService.updateBox(
+            boxList.id,
+            { totalPrice: boxList.totalPrice },
+            queryRunner.manager
+          );
+        }else{
           await this.boxListsService.updateBox(
             boxList.id,
             { totalPrice: boxList.totalPrice },
@@ -471,6 +487,15 @@ async cancelReceipt(receiptId: string, customerId: string) {
 
         if (historyPayment.paymentType === 'CREDIT') {
           creditToRefund += historyPayment.price ?? 0;
+        }
+
+        if (historyPayment.paymentType === 'CASH') {
+          boxList.totalPrice -= historyPayment.price ?? 0;
+          await this.boxListsService.updateBox(
+            boxList.id,
+            { totalPrice: boxList.totalPrice },
+            queryRunner.manager
+          );
         }
 
         if (

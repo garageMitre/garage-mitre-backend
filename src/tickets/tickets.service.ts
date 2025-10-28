@@ -367,16 +367,15 @@ async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRe
       }
     }
 
-    if(createTicketRegistrationForDayDto.paid){
       let boxList = await this.boxListsService.findBoxByDate(now);
   
       if (!boxList) {
           boxList = await this.boxListsService.createBox({
               date: now,
-              totalPrice: ticket.price
+              totalPrice: createTicketRegistrationForDayDto.paid ? ticket.price : 0
           });
       } else {
-          boxList.totalPrice += ticket.price;
+          boxList.totalPrice = createTicketRegistrationForDayDto.paid ?  ticket.price + boxList.totalPrice : boxList.totalPrice
   
           await this.boxListsService.updateBox(boxList.id, {
               totalPrice: boxList.totalPrice,
@@ -385,7 +384,6 @@ async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRe
   
       ticket.boxList = { id: boxList.id } as BoxList;
       
-    }
     const savedTicket = await this.ticketRegistrationForDayRepository.save(ticket);
     return savedTicket;
   } catch (error) {
