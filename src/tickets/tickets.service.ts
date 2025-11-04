@@ -458,12 +458,14 @@ async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRe
       if (!boxList) {
         throw new NotFoundException('Box list not found');
       }
+      if(ticket.paid === true){
+        boxList.totalPrice -= ticket.price;
+        await this.boxListsService.updateBox(boxList.id, {
+          totalPrice: boxList.totalPrice,
+        });
+      }
 
-      boxList.totalPrice -= ticket.price;
 
-      await this.boxListsService.updateBox(boxList.id, {
-        totalPrice: boxList.totalPrice,
-      });
 
       if(!ticket){
         throw new NotFoundException('Ticket list not found')
