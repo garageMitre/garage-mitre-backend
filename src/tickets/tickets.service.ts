@@ -518,7 +518,6 @@ async updateRegistration(existingRegistration: TicketRegistration, formattedDay:
         ticket.price = basePrice * blocksToCharge;
       }
       
-      await this.ticketRepository.save(ticket);
 
         const updateTicketRegistrationDto: UpdateTicketRegistrationDto = {
             description: `Tipo: ${existingRegistration.ticket.vehicleType}, Ent: ${existingRegistration.entryTime}, Sal: ${argentinaTime.format('HH:mm:ss')}`,
