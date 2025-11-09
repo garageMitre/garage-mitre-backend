@@ -626,6 +626,7 @@ async findAll(customerType: CustomerType) {
   
                 for(const receipt of pendingReceipts){
                   receipt.price = vehicleDto.amountRenter
+                  receipt.startAmount = vehicleDto.amountRenter
                   await queryRunner.manager.save(Receipt, receipt);
                 }
               }
@@ -653,6 +654,7 @@ async findAll(customerType: CustomerType) {
                   throw new NotFoundException('Vehicle renter not found');
                 }
           
+                findVehicleRenter.amount = vehicleDto.amountRenter;
                 findVehicleRenter.amount = vehicleDto.amountRenter;
                 findVehicleRenter.garageNumber = vehicleDto.garageNumber;
                 findVehicleRenter.vehicle = newVehicle;

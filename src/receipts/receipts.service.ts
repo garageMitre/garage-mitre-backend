@@ -198,7 +198,7 @@ async updateReceipt(
         // 💳 Pago con crédito
         if (payment.paymentType === 'CREDIT') {
           const creditToApply = Math.min(customer.credit ?? 0, receipt.price);
-          if (creditToApply <= 0) throw new BadRequestException('El cliente no tiene crédito disponible.');
+          if (creditToApply <= 0) throw new BadRequestException('El cliente no tiene crédito disponible.'); 
 
           const newCredit = customer.credit - creditToApply;
           const newReceiptPrice = receipt.price - creditToApply;
