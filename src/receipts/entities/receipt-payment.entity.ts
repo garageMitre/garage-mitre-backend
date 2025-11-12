@@ -1,8 +1,8 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn } from 'typeorm';
 import { Receipt } from './receipt.entity';
 import { BoxList } from 'src/box-lists/entities/box-list.entity';
 
-export const PAYMENT_TYPE = ['TRANSFER', 'CASH', 'CHECK', 'CREDIT', 'TP'] as const;
+export const PAYMENT_TYPE = ['TRANSFER', 'CASH', 'CHECK', 'CREDIT', 'TP', 'MIX'] as const;
 export type PaymentType = (typeof PAYMENT_TYPE)[number];
 
 @Entity({ name: 'receipt_payments' })
@@ -24,4 +24,7 @@ export class ReceiptPayment {
 
   @ManyToOne(() => BoxList, (boxList) => boxList.receiptPayments, {onDelete: 'CASCADE'})
   boxList: BoxList;
+
+  @CreateDateColumn()
+createdAt: Date;
 }

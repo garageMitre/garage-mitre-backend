@@ -268,17 +268,32 @@ async updateReceipt(
       if (lastOwnerPendingReceipt) {
         lastOwnerPendingReceipt.status = 'PAID';
         lastOwnerPendingReceipt.paymentDate = now;
-        
+      
         let boxList = await this.boxListsService.findBoxByDate(now, queryRunner.manager);
+        if (!boxList) {
+          boxList = await this.boxListsService.createBox({
+            date: now,
+            totalPrice: 0,
+          });
+        }
+      
+        // 💡 Determinar si el pago original del PRIVATE fue en efectivo
+        const privatePaidInCash = updateReceiptDto.payments.some(p => p.paymentType === 'CASH');
+      
+        // 💳 Si el private pagó en efectivo → MIX, sino → TP
+        const paymentTypeForOwner = privatePaidInCash ? 'MIX' : 'TP';
+      
+        // 💰 Crear el ReceiptPayment para el OWNER
+        const newPayment = this.receiptPaymentRepository.create({
+          paymentType: paymentTypeForOwner as any,
+          price: lastOwnerPendingReceipt.price,
+          paymentDate: now,
+          receipt: lastOwnerPendingReceipt,
+          boxList: { id: boxList.id } as BoxList,
+        });
+      
+        await this.receiptPaymentRepository.save(newPayment);
         await queryRunner.manager.save(lastOwnerPendingReceipt);
-      const newPayment = this.receiptPaymentRepository.create({
-        paymentType: 'TP',
-        price: lastOwnerPendingReceipt.price,
-        paymentDate: now,
-        receipt: lastOwnerPendingReceipt, 
-        boxList: { id: boxList.id } as BoxList,
-      });
-      await this.receiptPaymentRepository.save(newPayment);
       }
     }
 
@@ -409,121 +424,78 @@ async cancelReceipt(receiptId: string, customerId: string) {
 
     const customer = await customerRepo.findOne({
       where: { id: customerId },
-      relations: ['receipts'],
+      relations: [
+        'receipts',
+        'vehicleRenters',
+        'vehicleRenters.vehicle',
+        'vehicleRenters.vehicle.customer',
+        'vehicleRenters.vehicle.customer.receipts',
+        'vehicleRenters.vehicle.customer.receipts.payments',
+      ],
     });
 
-    if (!customer) {
-      throw new NotFoundException('Customer not found');
-    }
+    if (!customer) throw new NotFoundException('Customer not found');
 
     const lastPaidReceipt = await queryRunner.manager.findOne(Receipt, {
       where: { id: receiptId },
       relations: ['payments', 'paymentHistoryOnAccount'],
     });
 
-    if (!lastPaidReceipt) {
-      throw new NotFoundException({
-        code: 'RECEIPT_PAID_NOT_FOUND',
-        message: 'No receipts paid found',
-      });
-    }
+    if (!lastPaidReceipt) throw new NotFoundException('Receipt not found');
 
     const receiptDate = lastPaidReceipt.paymentDate;
     let boxList = await this.boxListsService.findBoxByDate(receiptDate, queryRunner.manager);
-
-    if (!boxList) {
-      throw new NotFoundException('Box list not found');
-    }
+    if (!boxList) throw new NotFoundException('Box list not found');
 
     // =========================================================
-    // 💳 1. Revertir pagos
+    // 💳 1. Revertir pagos del recibo actual
     // =========================================================
     let creditToRefund = 0;
 
-    // 💵 Pagos normales y crédito
-    if (lastPaidReceipt.payments.length > 0) {
-      for (const payment of lastPaidReceipt.payments) {
-        console.log(`↩️ Revirtiendo pago: ${payment.paymentType} - $${payment.price}`);
+    for (const payment of lastPaidReceipt.payments ?? []) {
+      console.log(`↩️ Revirtiendo pago: ${payment.paymentType} - $${payment.price}`);
 
-        // Si es crédito, lo sumamos al monto a reintegrar
-        if (payment.paymentType === 'CREDIT') {
-          creditToRefund += payment.price ?? 0;
-        }
-
-        if (payment.paymentType === 'CASH') {
-          boxList.totalPrice -= payment.price ?? 0;
-          await this.boxListsService.updateBox(
-            boxList.id,
-            { totalPrice: boxList.totalPrice },
-            queryRunner.manager
-          );
-        }
-  
-
-        if (
-          payment.paymentType !== 'TRANSFER' &&
-          payment.paymentType !== 'TP'
-        ) {
-          await this.boxListsService.updateBox(
-            boxList.id,
-            { totalPrice: boxList.totalPrice },
-            queryRunner.manager
-          );
-        }else{
-          await this.boxListsService.updateBox(
-            boxList.id,
-            { totalPrice: boxList.totalPrice },
-            queryRunner.manager
-          );
-        }
-        
+      if (payment.paymentType === 'CREDIT') {
+        creditToRefund += payment.price ?? 0;
       }
+
+      if (payment.paymentType === 'CASH') {
+        boxList.totalPrice -= payment.price ?? 0;
+      }
+
+      await this.boxListsService.updateBox(
+        boxList.id,
+        { totalPrice: boxList.totalPrice },
+        queryRunner.manager,
+      );
     }
 
-    // 🧾 Pagos a cuenta
-    if (lastPaidReceipt.paymentHistoryOnAccount.length > 0) {
-      for (const historyPayment of lastPaidReceipt.paymentHistoryOnAccount) {
-        console.log(`↩️ Revirtiendo pago a cuenta: ${historyPayment.paymentType} - $${historyPayment.price}`);
-
-        if (historyPayment.paymentType === 'CREDIT') {
-          creditToRefund += historyPayment.price ?? 0;
-        }
-
-        if (historyPayment.paymentType === 'CASH') {
-          boxList.totalPrice -= historyPayment.price ?? 0;
-          await this.boxListsService.updateBox(
-            boxList.id,
-            { totalPrice: boxList.totalPrice },
-            queryRunner.manager
-          );
-        }
-
-        if (
-          historyPayment.paymentType !== 'TRANSFER' &&
-          historyPayment.paymentType !== 'TP'
-        ) {
-          boxList.totalPrice -= historyPayment.price;
-          await this.boxListsService.updateBox(
-            boxList.id,
-            { totalPrice: boxList.totalPrice },
-            queryRunner.manager
-          );
-        }
-        
+    for (const historyPayment of lastPaidReceipt.paymentHistoryOnAccount ?? []) {
+      if (historyPayment.paymentType === 'CREDIT') {
+        creditToRefund += historyPayment.price ?? 0;
       }
+
+      if (historyPayment.paymentType === 'CASH') {
+        boxList.totalPrice -= historyPayment.price ?? 0;
+      }
+
+      await this.boxListsService.updateBox(
+        boxList.id,
+        { totalPrice: boxList.totalPrice },
+        queryRunner.manager,
+      );
     }
 
     // =========================================================
     // 💰 2. Reintegrar crédito al cliente si aplica
     // =========================================================
     if (creditToRefund > 0) {
-      console.log(`💳 Reintegrando $${creditToRefund} al crédito del cliente`);
       const newCredit = (customer.credit ?? 0) + creditToRefund;
       await queryRunner.manager.update(Customer, { id: customer.id }, { credit: newCredit });
     }
 
     // =========================================================
-    // 🧾 3. Resetear el recibo
+    // 🧾 3. Resetear recibo actual
     // =========================================================
     lastPaidReceipt.status = 'PENDING';
     lastPaidReceipt.paymentDate = null;
@@ -531,32 +503,80 @@ async cancelReceipt(receiptId: string, customerId: string) {
     lastPaidReceipt.price = lastPaidReceipt.startAmount;
 
     await receiptRepo.save(lastPaidReceipt);
-    await receiptPaymentRepo.remove(lastPaidReceipt.payments);
-    await paymentHistoryRepo.remove(lastPaidReceipt.paymentHistoryOnAccount);
+    await receiptPaymentRepo.remove(lastPaidReceipt.payments ?? []);
+    await paymentHistoryRepo.remove(lastPaidReceipt.paymentHistoryOnAccount ?? []);
 
     // =========================================================
-    // 🪙 4. Actualizar deuda mensual
+    // 🧍‍♂️ 4. Si el CUSTOMER es PRIVATE → cancelar pago del OWNER con tipo AT o MIX
     // =========================================================
-    if (customer.monthsDebt && Array.isArray(customer.monthsDebt)) {
-      const receiptMonth = lastPaidReceipt.startDate.slice(0, 7);
+// =========================================================
+// 🧍‍♂️ 4. Si el CUSTOMER es PRIVATE → cancelar pago del OWNER con tipo MIX
+// =========================================================
+if (customer.customerType === 'PRIVATE') {
+  const owner = customer.vehicleRenters?.[0]?.vehicle?.customer;
 
-      customer.monthsDebt = customer.monthsDebt.map((debt) => {
-        const debtMonth = debt.month.slice(0, 7);
-        if (debtMonth === receiptMonth && lastPaidReceipt.status === 'PENDING') {
-          return { ...debt, status: 'PENDING' };
-        }
-        return debt;
+  if (owner) {
+    const ownerPayments = await receiptPaymentRepo.find({
+      where: { receipt: { customer: { id: owner.id } } },
+      order: { paymentDate: 'DESC' as const },
+      relations: ['receipt'],
+    });
+
+    // ✅ Buscamos el último pago tipo MIX o AT
+    const lastATorMIX = ownerPayments.find(
+      (p) => p.paymentType === 'TP' || p.paymentType === 'MIX',
+    );
+
+    // Solo actuamos si es MIX
+    if (lastATorMIX && lastATorMIX.paymentType === 'MIX') {
+      console.log(
+        `🚫 Cancelando ReceiptPayment del OWNER tipo MIX por $${lastATorMIX.price}`,
+      );
+
+      // Restar el monto del boxList (solo MIX)
+      const ownerBoxList = await this.boxListsService.findBoxByDate(
+        lastATorMIX.paymentDate,
+        queryRunner.manager,
+      );
+
+      if (ownerBoxList) {
+        ownerBoxList.totalPrice -= lastATorMIX.price ?? 0;
+        await this.boxListsService.updateBox(
+          ownerBoxList.id,
+          { totalPrice: ownerBoxList.totalPrice },
+          queryRunner.manager,
+        );
+      }
+
+      // Eliminar el pago MIX del owner
+      await receiptPaymentRepo.remove(lastATorMIX);
+
+      // Dejar el recibo del owner como pendiente si era su único pago
+      const ownerReceipt = lastATorMIX.receipt;
+      const remainingPayments = await receiptPaymentRepo.count({
+        where: { receipt: { id: ownerReceipt.id } },
       });
 
-      customer.hasDebt = true;
-      await queryRunner.manager.update(Customer, { id: customer.id }, {
-        monthsDebt: customer.monthsDebt as any,
-        hasDebt: true,
-      });
+      if (remainingPayments === 0) {
+        ownerReceipt.status = 'PENDING';
+        ownerReceipt.paymentDate = null;
+        ownerReceipt.paymentType = null;
+        ownerReceipt.price = ownerReceipt.startAmount;
+        await receiptRepo.save(ownerReceipt);
+      }
+
+      console.log(`✅ Pago MIX del OWNER revertido correctamente`);
+    } else if (lastATorMIX && lastATorMIX.paymentType === 'TP') {
+      console.log(`ℹ️ El último pago del OWNER es AT → no se modifica.`);
+    } else {
+      console.log(`ℹ️ No se encontró ningún pago AT o MIX en el OWNER.`);
     }
+  }
+}
+
 
     // =========================================================
-    // ✅ 5. Commit final
+    // ✅ Commit final
     // =========================================================
     await queryRunner.commitTransaction();
     console.log("✅ [cancelReceipt] Completado correctamente");
@@ -565,15 +585,13 @@ async cancelReceipt(receiptId: string, customerId: string) {
   } catch (error) {
     console.error("❌ [cancelReceipt] Error:", error);
     await queryRunner.rollbackTransaction();
-    if (!(error instanceof NotFoundException)) {
-      this.logger.error(error.message, error.stack);
-    }
     throw error;
   } finally {
     console.log("🔚 [cancelReceipt] Liberando queryRunner");
     await queryRunner.release();
   }
 }
+
 
 
 async createReceiptMan(dateNowFront: string, customerType: CustomerType): Promise<Receipt[]> {
