@@ -448,35 +448,43 @@ async cancelReceipt(receiptId: string, customerId: string) {
     if (!boxList) throw new NotFoundException('Box list not found');
 
     // =========================================================
-    // 💳 1. Revertir pagos del recibo actual
+    // 💳 1. Revertir pagos del recibo actual (EF o MIX)
     // =========================================================
     let creditToRefund = 0;
 
-    for (const payment of lastPaidReceipt.payments ?? []) {
-      console.log(`↩️ Revirtiendo pago: ${payment.paymentType} - $${payment.price}`);
+// 1) Revertir pagos del recibo actual (solo resta EF)
+for (const payment of lastPaidReceipt.payments ?? []) {
+  if (payment.paymentType === 'CREDIT') {
+    creditToRefund += payment.price ?? 0;
+  }
 
-      if (payment.paymentType === 'CREDIT') {
-        creditToRefund += payment.price ?? 0;
-      }
+  // ✅ solo EF impacta en caja
+  if (payment.paymentType === 'CASH') {
+    boxList.totalPrice -= payment.price ?? 0;
+    await this.boxListsService.updateBox(boxList.id, { totalPrice: boxList.totalPrice }, queryRunner.manager);
+  }
+}
 
-      if (payment.paymentType === 'CASH') {
-        boxList.totalPrice -= payment.price ?? 0;
-      }
+// history on account (solo resta EF)
+for (const historyPayment of lastPaidReceipt.paymentHistoryOnAccount ?? []) {
+  if (historyPayment.paymentType === 'CREDIT') {
+    creditToRefund += historyPayment.price ?? 0;
+  }
 
-      await this.boxListsService.updateBox(
-        boxList.id,
-        { totalPrice: boxList.totalPrice },
-        queryRunner.manager,
-      );
-    }
+  // ✅ solo EF impacta en caja
+  if (historyPayment.paymentType === 'CASH') {
+    boxList.totalPrice -= historyPayment.price ?? 0;
+    await this.boxListsService.updateBox(boxList.id, { totalPrice: boxList.totalPrice }, queryRunner.manager);
+  }
+}
+
 
     for (const historyPayment of lastPaidReceipt.paymentHistoryOnAccount ?? []) {
+      if (historyPayment.paymentType === 'CASH' || historyPayment.paymentType === 'MIX') {
+        boxList.totalPrice -= historyPayment.price ?? 0;
+      }
       if (historyPayment.paymentType === 'CREDIT') {
         creditToRefund += historyPayment.price ?? 0;
-      }
-
-      if (historyPayment.paymentType === 'CASH') {
-        boxList.totalPrice -= historyPayment.price ?? 0;
       }
 
       await this.boxListsService.updateBox(
@@ -507,11 +515,10 @@ async cancelReceipt(receiptId: string, customerId: string) {
     await paymentHistoryRepo.remove(lastPaidReceipt.paymentHistoryOnAccount ?? []);
 
     // =========================================================
-    // 🧍‍♂️ 4. Si el CUSTOMER es PRIVATE → cancelar pago del OWNER con tipo AT o MIX
+    // 🧍‍♂️ 4. Si el CUSTOMER es PRIVATE → cancelar también EF o MIX del OWNER
     // =========================================================
-// =========================================================
-// 🧍‍♂️ 4. Si el CUSTOMER es PRIVATE → cancelar pago del OWNER con tipo MIX
-// =========================================================
+// 2) Si el CUSTOMER es PRIVATE → cancelar el último pago del OWNER
+//    Consideramos EF o MIX, pero solo EF resta en caja
 if (customer.customerType === 'PRIVATE') {
   const owner = customer.vehicleRenters?.[0]?.vehicle?.customer;
 
@@ -522,54 +529,34 @@ if (customer.customerType === 'PRIVATE') {
       relations: ['receipt'],
     });
 
-    // ✅ Buscamos el último pago tipo MIX o AT
-    const lastATorMIX = ownerPayments.find(
-      (p) => p.paymentType === 'TP' || p.paymentType === 'MIX',
+    // buscamos el último EF o MIX (ignoramos TP)
+    const lastEForMIX = ownerPayments.find(
+      p => p.paymentType === 'CASH' || p.paymentType === 'MIX'
     );
 
-    // Solo actuamos si es MIX
-    if (lastATorMIX && lastATorMIX.paymentType === 'MIX') {
-      console.log(
-        `🚫 Cancelando ReceiptPayment del OWNER tipo MIX por $${lastATorMIX.price}`,
-      );
-
-      // Restar el monto del boxList (solo MIX)
-      const ownerBoxList = await this.boxListsService.findBoxByDate(
-        lastATorMIX.paymentDate,
-        queryRunner.manager,
-      );
-
-      if (ownerBoxList) {
-        ownerBoxList.totalPrice -= lastATorMIX.price ?? 0;
-        await this.boxListsService.updateBox(
-          ownerBoxList.id,
-          { totalPrice: ownerBoxList.totalPrice },
-          queryRunner.manager,
-        );
+    if (lastEForMIX) {
+      // ✅ solo restar si es EF
+      if (lastEForMIX.paymentType === 'CASH') {
+        const ownerBoxList = await this.boxListsService.findBoxByDate(lastEForMIX.paymentDate, queryRunner.manager);
+        if (ownerBoxList) {
+          ownerBoxList.totalPrice -= lastEForMIX.price ?? 0;
+          await this.boxListsService.updateBox(ownerBoxList.id, { totalPrice: ownerBoxList.totalPrice }, queryRunner.manager);
+        }
       }
 
-      // Eliminar el pago MIX del owner
-      await receiptPaymentRepo.remove(lastATorMIX);
+      // eliminar el pago (EF o MIX)
+      await receiptPaymentRepo.remove(lastEForMIX);
 
-      // Dejar el recibo del owner como pendiente si era su único pago
-      const ownerReceipt = lastATorMIX.receipt;
-      const remainingPayments = await receiptPaymentRepo.count({
-        where: { receipt: { id: ownerReceipt.id } },
-      });
-
-      if (remainingPayments === 0) {
+      // si no quedan pagos, dejar el recibo del owner en PENDING
+      const ownerReceipt = lastEForMIX.receipt;
+      const remaining = await receiptPaymentRepo.count({ where: { receipt: { id: ownerReceipt.id } } });
+      if (remaining === 0) {
         ownerReceipt.status = 'PENDING';
         ownerReceipt.paymentDate = null;
         ownerReceipt.paymentType = null;
         ownerReceipt.price = ownerReceipt.startAmount;
         await receiptRepo.save(ownerReceipt);
       }
-
-      console.log(`✅ Pago MIX del OWNER revertido correctamente`);
-    } else if (lastATorMIX && lastATorMIX.paymentType === 'TP') {
-      console.log(`ℹ️ El último pago del OWNER es AT → no se modifica.`);
-    } else {
-      console.log(`ℹ️ No se encontró ningún pago AT o MIX en el OWNER.`);
     }
   }
 }
@@ -587,7 +574,6 @@ if (customer.customerType === 'PRIVATE') {
     await queryRunner.rollbackTransaction();
     throw error;
   } finally {
-    console.log("🔚 [cancelReceipt] Liberando queryRunner");
     await queryRunner.release();
   }
 }

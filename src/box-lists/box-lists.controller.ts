@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, NotFoundException, UseGuards, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, NotFoundException, UseGuards, Delete, Patch } from '@nestjs/common';
 import { BoxListsService } from './box-lists.service';
 import { CreateBoxListDto } from './dto/create-box-list.dto';
 import { UpdateBoxListDto } from './dto/update-box-list.dto';
@@ -35,6 +35,16 @@ export class BoxListsController {
   async findOne(@Param('id') id: string) {
       return await this.boxListsService.findOne(id);
   }
+
+// PATCH /box-lists/update-by-date/:date
+@Patch('update-by-date/:date')
+async updateBoxByDate(
+  @Param('date') date: string,
+  @Body() body: { totalPrice: number },
+) {
+  return await this.boxListsService.updateBoxByDate(date, body.totalPrice);
+}
+
 
   @Put(':id')
   async updateBox(@Param('id') id: string, @Body() updateBoxListDto: UpdateBoxListDto) {

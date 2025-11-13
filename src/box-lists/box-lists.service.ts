@@ -281,5 +281,20 @@ async createBox(createBoxListDto: CreateBoxListDto) {
   }
 
 
-
+  async updateBoxByDate(date: string, totalPrice: number) {
+    try {
+      const boxList = await this.boxListRepository.findOne({ where: { date } });
+  
+      if (!boxList) {
+        throw new NotFoundException(`No se encontró BoxList para la fecha ${date}`);
+      }
+  
+      // Actualizar el totalPrice con tu método existente
+      return await this.updateBox(boxList.id, { totalPrice });
+    } catch (error) {
+      this.logger.error(`❌ Error al actualizar BoxList para ${date}: ${error.message}`);
+      throw error;
+    }
+  }
+  
 }
