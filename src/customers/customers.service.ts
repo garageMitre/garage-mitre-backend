@@ -125,6 +125,9 @@ export class CustomersService {
                   message: `El número de garage ${vehicleDto.garageNumber} ya se encuentra en uso`,
                 });
               }
+
+              if(vehicleDto.amountRenter < parkingType.amount){
+                throw new BadRequestException('El monto del alquiler debe ser mayor al monto de expensas')              }
     
               const vehicle = vehicleRepo.create({
                 ...vehicleDto,
