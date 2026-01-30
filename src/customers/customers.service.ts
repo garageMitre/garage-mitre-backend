@@ -1187,59 +1187,72 @@ async createParkingType(createParkingTypeDto: CreateParkingTypeDto) {
     }
   }
 
-  async updateparkingType(parkingTypeId: string, updateParkingTypeDto: UpdateParkingTypeDto) {
-    try {
-      const parkingType = await this.parkingTypeRepository.findOne({ where: { id: parkingTypeId } });
-  
-      if (!parkingType) {
-        throw new NotFoundException('ParkingType not found');
-      }
+async updateparkingType(parkingTypeId: string, updateParkingTypeDto: UpdateParkingTypeDto) {
+  try {
+    const parkingType = await this.parkingTypeRepository.findOne({
+      where: { id: parkingTypeId },
+    })
 
-      const owners = await this.customerRepository.find({
-        where: { customerType: 'OWNER' },
-        relations: ['vehicles', 'vehicles.parkingType', 'receipts'], // Asegúrate de cargar los vehículos
-      });
-
-        for (const owner of owners) {
-          const vehiclesToUpdate = owner.vehicles.filter(
-            (vehicle) => vehicle.parkingType?.id === parkingType.id
-          );
-
-          if (vehiclesToUpdate.length > 0) {
-            const count = vehiclesToUpdate.length;
-            const amountDifference = (updateParkingTypeDto.amount - parkingType.amount) * count;
-            
-
-            for (const receipt of owner.receipts) {
-              const receiptMonthStr = receipt.startDate.slice(0, 7); // ej: '2025-05'
-              const hasDebtForMonth = owner.monthsDebt?.some(debt => debt.month.slice(0, 7) === receiptMonthStr);
-
-              if (!hasDebtForMonth && receipt.status === 'PENDING') {
-                receipt.price += amountDifference;
-                receipt.startAmount = receipt.price;
-                await this.receiptRepository.save(receipt);
-              }
-            }
-
-            for (const vehicle of vehiclesToUpdate) {
-              vehicle.amount = updateParkingTypeDto.amount;
-              await this.vehicleRepository.save(vehicle);
-            }
-          }
-        }
-
-  
-      const updatedParkingType = this.parkingTypeRepository.merge(parkingType, updateParkingTypeDto);
-      const savedParkingType = await this.parkingTypeRepository.save(updatedParkingType);
-  
-      return savedParkingType;
-    } catch (error) {
-      if (!(error instanceof NotFoundException)) {
-        this.logger.error(error.message, error.stack);
-      }
-      throw error;
+    if (!parkingType) {
+      throw new NotFoundException("ParkingType not found")
     }
+
+    const targetMonth = updateParkingTypeDto.month // "YYYY-MM"
+    const newAmount = updateParkingTypeDto.amount
+
+    const owners = await this.customerRepository.find({
+      where: { customerType: "OWNER" },
+      relations: ["vehicles", "vehicles.parkingType", "receipts"],
+    })
+
+    for (const owner of owners) {
+      const vehiclesToUpdate = owner.vehicles.filter(
+        (vehicle) => vehicle.parkingType?.id === parkingType.id,
+      )
+
+      if (vehiclesToUpdate.length === 0) continue
+
+      const count = vehiclesToUpdate.length
+
+      // ✅ Si tiene 1 vehículo, queda exacto. Si tiene más, multiplica.
+      const exactReceiptTotal = count > 1 ? newAmount * count : newAmount
+
+      for (const receipt of owner.receipts) {
+        const receiptMonthStr = receipt.startDate?.slice(0, 7) // "YYYY-MM"
+        if (receiptMonthStr !== targetMonth) continue
+        if (receipt.status !== "PENDING") continue
+
+        // (Opcional) mantenemos tu regla monthsDebt
+        const hasDebtForMonth = owner.monthsDebt?.some(
+          (debt) => debt.month?.slice(0, 7) === receiptMonthStr,
+        )
+        if (hasDebtForMonth) continue
+
+        // ✅ Set exacto
+        receipt.price = exactReceiptTotal
+        receipt.startAmount = exactReceiptTotal
+        await this.receiptRepository.save(receipt)
+      }
+
+      // ✅ Actualizo el amount por vehículo (es el valor base, no multiplicado)
+      for (const vehicle of vehiclesToUpdate) {
+        vehicle.amount = newAmount
+        await this.vehicleRepository.save(vehicle)
+      }
+    }
+
+    const updatedParkingType = this.parkingTypeRepository.merge(parkingType, updateParkingTypeDto)
+    const savedParkingType = await this.parkingTypeRepository.save(updatedParkingType)
+
+    return savedParkingType
+  } catch (error) {
+    if (!(error instanceof NotFoundException)) {
+      this.logger.error(error.message, error.stack)
+    }
+    throw error
   }
+}
+
   
 async removeParkingType(parkingTypeId: string) {
   try{
