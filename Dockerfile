@@ -1,9 +1,8 @@
 FROM node:20-bookworm-slim
 
-# Evita prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ==== FIX APT: https + ipv4 ====
+# deps para chromium (si realmente lo necesitás)
 RUN apt-get update -o Acquire::ForceIPv4=true -o Acquire::Retries=5 \
   && apt-get install -y --no-install-recommends \
     chromium \
@@ -13,11 +12,18 @@ RUN apt-get update -o Acquire::ForceIPv4=true -o Acquire::Retries=5 \
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci
+# habilita corepack (viene con node 20) para usar pnpm
+RUN corepack enable
 
+# copiar manifests y lock de pnpm
+COPY package.json pnpm-lock.yaml ./
+
+# install determinístico usando el lock
+RUN pnpm install --frozen-lockfile
+
+# copiar el resto y build
 COPY . .
-RUN npm run build
+RUN pnpm build
 
-EXPOSE 3000
-CMD ["npm","run","start:prod"]
+EXPOSE 3030
+CMD ["pnpm","start:prod"]
