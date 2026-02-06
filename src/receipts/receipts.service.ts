@@ -130,47 +130,183 @@ async updateReceipt(
   await queryRunner.connect();
   await queryRunner.startTransaction();
 
+  // =========================================================
+  // ✅ Helper (solo EF/CH impacta en caja)
+  // =========================================================
+  const shouldAffectBox = (paymentType: string) =>
+    paymentType === "CASH" || paymentType === "CHECK";
+
+  // =========================================================
+  // ✅ Helper: repartir leftover del PRIVATE en numberInBox
+  //    (sum(numberInBox) = leftover, nunca > price por payment)
+  // =========================================================
+  const distributeLeftoverAcrossPrivatePayments = async (
+    privatePaymentsToUpdate: ReceiptPayment[],
+    leftover: number
+  ) => {
+    // seteo todo en 0 primero
+    for (const p of privatePaymentsToUpdate) {
+      p.numberInBox = 0;
+    }
+
+    let remaining = leftover;
+
+    // reparto en orden (podés cambiar a “último payment” si querés)
+    for (const p of privatePaymentsToUpdate) {
+      if (remaining <= 0) break;
+
+      const cap = Math.max(0, Number(p.price ?? 0));
+      const applied = Math.min(cap, remaining);
+
+      p.numberInBox = applied;
+      remaining -= applied;
+    }
+
+    await queryRunner.manager.save(privatePaymentsToUpdate);
+  };
+
+  // =========================================================
+  // ✅ FUNCIÓN APARTE:
+  //    Compensa PRIVATE -> OWNER (FIFO, parcial, numberInBox)
+  // =========================================================
+  const applyPrivateOwnerCompensation = async (args: {
+    now: string;
+    privateHasFIX: boolean;
+    sharedBoxList: BoxList | null;
+
+    // PRIVATE payments creados en este update (solo los que NO son CREDIT y NO son FIX)
+    privatePaymentsCreated: ReceiptPayment[];
+
+    // recibos pendientes OWNER (ordenados FIFO)
+    ownerPendingReceipts: Receipt[];
+
+    // tipo de pago que vas a guardar para OWNER ("MIX" o "TP")
+    paymentTypeForOwner: "MIX" | "TP";
+  }) => {
+    const {
+      now,
+      privateHasFIX,
+      sharedBoxList,
+      privatePaymentsCreated,
+      ownerPendingReceipts,
+      paymentTypeForOwner,
+    } = args;
+
+    // Si el private pagó FIX, NO hay movimiento en caja ni se muestran movimientos en boxList
+    if (privateHasFIX) {
+      // igual seteamos numberInBox = 0 en lo que haya (por prolijidad)
+      for (const p of privatePaymentsCreated) p.numberInBox = 0;
+      if (privatePaymentsCreated.length) await queryRunner.manager.save(privatePaymentsCreated);
+      return;
+    }
+
+    if (!sharedBoxList) return;
+    if (!ownerPendingReceipts?.length) {
+      // no hay owner → todo lo del private queda en boxlist como venía
+      // (si querés, acá podrías poner numberInBox = price, pero vos pediste que “solo cambie” cuando hay cruce)
+      for (const p of privatePaymentsCreated) {
+        p.numberInBox = Number(p.price ?? 0);
+      }
+      if (privatePaymentsCreated.length) await queryRunner.manager.save(privatePaymentsCreated);
+      return;
+    }
+
+    // ✅ Total pagado por el private (no credit / no fix) en este update
+    const privateTotalPaid = privatePaymentsCreated.reduce(
+      (sum, p) => sum + Number(p.price ?? 0),
+      0
+    );
+
+    // ✅ Total deuda owner (sum de los receipt.price actuales)
+    const ownerTotalDebt = ownerPendingReceipts.reduce(
+      (sum, r) => sum + Number(r.price ?? 0),
+      0
+    );
+
+    // ✅ cuánto del private va a cubrir al owner
+    let toAllocateToOwner = Math.min(privateTotalPaid, ownerTotalDebt);
+
+    // ✅ leftover del private (lo que “le sobra”)
+    const privateLeftover = Math.max(0, privateTotalPaid - toAllocateToOwner);
+
+    // 🔥 numberInBox del PRIVATE = leftover (repartido entre sus payments creados)
+    await distributeLeftoverAcrossPrivatePayments(privatePaymentsCreated, privateLeftover);
+
+    // ✅ Ahora aplico al owner FIFO (parcial permitido)
+    for (const ownerReceipt of ownerPendingReceipts) {
+      if (toAllocateToOwner <= 0) break;
+
+      const ownerCurrentDebt = Number(ownerReceipt.price ?? 0);
+      if (ownerCurrentDebt <= 0) continue;
+
+      const apply = Math.min(ownerCurrentDebt, toAllocateToOwner);
+      toAllocateToOwner -= apply;
+
+      // ✅ creo ReceiptPayment del OWNER por lo aplicado (NO por el total)
+      const ownerPayment = this.receiptPaymentRepository.create({
+        paymentType: paymentTypeForOwner as any,
+        price: apply,
+        paymentDate: now,
+        receipt: ownerReceipt,
+        boxList: { id: sharedBoxList.id } as BoxList, // ✅ aparece en boxlist
+        numberInBox: apply, // ✅ lo que se muestra
+      });
+
+      await this.receiptPaymentRepository.save(ownerPayment);
+
+      // ✅ Actualizo recibo owner (PAID si se cubre completo, si no queda PENDING con resto)
+      const remainingDebt = ownerCurrentDebt - apply;
+
+      if (remainingDebt <= 0) {
+        ownerReceipt.price = 0;
+        ownerReceipt.status = "PAID";
+        ownerReceipt.paymentDate = now;
+      } else {
+        ownerReceipt.price = remainingDebt;
+        ownerReceipt.status = "PENDING";
+        ownerReceipt.paymentDate = null;
+      }
+
+      await queryRunner.manager.save(ownerReceipt);
+    }
+  };
+
   try {
     // =========================================================
     // 🧍 Buscar CUSTOMER y RECEIPT
     // =========================================================
     const customer = await queryRunner.manager.findOne(Customer, {
       where: { id: customerId },
-      relations: ['receipts'],
+      relations: ["receipts"],
     });
-    if (!customer) throw new NotFoundException('Customer not found');
+    if (!customer) throw new NotFoundException("Customer not found");
 
     const receipt = !updateReceiptDto.barcode
       ? await queryRunner.manager.findOne(Receipt, { where: { id: receiptId } })
-      : await queryRunner.manager.findOne(Receipt, { where: { barcode: updateReceiptDto.barcode } });
+      : await queryRunner.manager.findOne(Receipt, {
+          where: { barcode: updateReceiptDto.barcode },
+        });
 
-    if (!receipt) throw new NotFoundException('Receipt not found');
-    if (receipt.status === 'PAID') throw new BadRequestException('Receipt already paid');
+    if (!receipt) throw new NotFoundException("Receipt not found");
+    if (receipt.status === "PAID") throw new BadRequestException("Receipt already paid");
 
-    const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires').startOf('day');
-    const now = argentinaTime.format('YYYY-MM-DD');
-
-    // ✅ helper: solo EF/CH impacta en caja. FIX no registra BoxList.
-    const shouldAffectBox = (paymentType: string) =>
-      paymentType === 'CASH' || paymentType === 'CHECK';
+    const argentinaTime = dayjs().tz("America/Argentina/Buenos_Aires").startOf("day");
+    const now = argentinaTime.format("YYYY-MM-DD");
 
     // =========================================================
     // 🧭 Buscar recibos pendientes del OWNER si el customer es PRIVATE
-    //     - Ordenados por startDate (más viejo primero)
-    //     - Si hay 2 o más pendientes -> tomar 2 (los más viejos)
-    //     - Si hay 1 -> tomar 1
     // =========================================================
     let ownerPendingReceiptsToAutoPay: Receipt[] = [];
     let ownerToLink: Customer | null = null;
 
-    if (customer.customerType === 'PRIVATE') {
+    if (customer.customerType === "PRIVATE") {
       const receiptWithRelations = await queryRunner.manager.findOne(Receipt, {
         where: { id: receipt.id },
         relations: [
-          'customer',
-          'customer.vehicleRenters',
-          'customer.vehicleRenters.vehicle',
-          'customer.vehicleRenters.vehicle.customer',
+          "customer",
+          "customer.vehicleRenters",
+          "customer.vehicleRenters.vehicle",
+          "customer.vehicleRenters.vehicle.customer",
         ],
       });
 
@@ -179,9 +315,9 @@ async updateReceipt(
 
       if (owner) {
         const ownerPendings = await queryRunner.manager.find(Receipt, {
-          where: { customer: { id: owner.id }, status: 'PENDING' },
-          order: { startDate: 'ASC' }, // ✅ IMPORTANTE: NO usar createdAt
-          take: 2,                     // ✅ si hay 2+ pendientes, traemos los 2 más viejos
+          where: { customer: { id: owner.id }, status: "PENDING" },
+          order: { startDate: "ASC" }, // ✅ FIFO por startDate
+          take: 2, // ✅ vos querías 2 para manual
         });
 
         ownerPendingReceiptsToAutoPay = ownerPendings ?? [];
@@ -193,25 +329,23 @@ async updateReceipt(
     // =========================================================
     if (updateReceiptDto.onAccount === false) {
       const totalWithoutCredit = updateReceiptDto.payments
-        .filter(p => p.paymentType !== 'CREDIT')
+        .filter((p) => p.paymentType !== "CREDIT")
         .reduce((sum, p) => sum + (p.price ?? 0), 0);
 
-      const creditToUse = updateReceiptDto.payments.some(p => p.paymentType === 'CREDIT')
+      const creditToUse = updateReceiptDto.payments.some((p) => p.paymentType === "CREDIT")
         ? Math.min(customer.credit ?? 0, receipt.price)
         : 0;
 
       const totalToPay = totalWithoutCredit + creditToUse;
       if (totalToPay > receipt.price) {
-        throw new BadRequestException('La suma de los montos no puede superar el total del recibo.');
+        throw new BadRequestException("La suma de los montos no puede superar el total del recibo.");
       }
 
       // ✅ Si el private paga con FIX en alguno de sus pagos, NO registramos nada en BoxList
-      const privateHasFIX = updateReceiptDto.payments.some(p => p.paymentType === 'FIX');
+      const privateHasFIX = updateReceiptDto.payments.some((p) => p.paymentType === "FIX");
 
-      // ✅ Este boxList se va a usar también para linkear autopagos del OWNER (si no es FIX)
+      // ✅ BoxList compartido del día (solo si NO hay FIX)
       let sharedBoxList: BoxList | null = null;
-
-      // Si NO es FIX, me aseguro de tener un boxList del día
       if (!privateHasFIX) {
         sharedBoxList = await this.boxListsService.findBoxByDate(now, queryRunner.manager);
         if (!sharedBoxList) {
@@ -222,18 +356,20 @@ async updateReceipt(
         }
       }
 
+      // ✅ Vamos a guardar acá los payments creados del PRIVATE (para setear numberInBox después)
+      const privatePaymentsCreatedForCompensation: ReceiptPayment[] = [];
+
       for (const payment of updateReceiptDto.payments) {
-        // 💳 Pago con crédito
-        if (payment.paymentType === 'CREDIT') {
+        // 💳 Pago con crédito (lo dejás como venías)
+        if (payment.paymentType === "CREDIT") {
           const creditToApply = Math.min(customer.credit ?? 0, receipt.price);
-          if (creditToApply <= 0) throw new BadRequestException('El cliente no tiene crédito disponible.');
+          if (creditToApply <= 0) {
+            throw new BadRequestException("El cliente no tiene crédito disponible.");
+          }
 
           const newCredit = customer.credit - creditToApply;
           const newReceiptPrice = receipt.price - creditToApply;
 
-          // ⚠️ Crédito no es FIX → se mantiene tu lógica: se registra con boxList del día
-          // Si el usuario además mandó FIX en otro payment, vos querés que FIX no registre,
-          // pero crédito sí se puede seguir registrando como venías (esto lo dejo igual).
           let boxList = await this.boxListsService.findBoxByDate(now, queryRunner.manager);
           if (!boxList) {
             boxList = await this.boxListsService.createBox({
@@ -243,18 +379,20 @@ async updateReceipt(
           }
 
           const creditPayment = this.receiptPaymentRepository.create({
-            paymentType: 'CREDIT' as any,
+            paymentType: "CREDIT" as any,
             price: creditToApply,
             paymentDate: now,
             receipt,
             boxList: { id: boxList.id } as BoxList,
+            numberInBox: creditToApply, // ✅ si querés que se muestre ese valor (si no, ponelo 0)
           });
+
           await this.receiptPaymentRepository.save(creditPayment);
           await queryRunner.manager.update(Customer, { id: customer.id }, { credit: newCredit });
 
           receipt.price = newReceiptPrice;
           if (newReceiptPrice === 0) {
-            receipt.status = 'PAID';
+            receipt.status = "PAID";
             receipt.paymentDate = now;
           }
           continue;
@@ -263,12 +401,11 @@ async updateReceipt(
         // 💵 Pagos normales
         const total = payment.price ?? 0;
 
-        // ✅ FIX: NO registrar en BoxList (boxList = null)
-        // ✅ Normal: SIEMPRE registrar en BoxList (aunque no afecte totalPrice)
+        // ✅ FIX: boxList = null
+        // ✅ Normal: SIEMPRE link a boxList (aunque no afecte totalPrice)
         let boxListForThisPayment: BoxList | null = null;
 
-        if (payment.paymentType !== 'FIX') {
-          // uso el boxList compartido del día (si existe), si no, lo busco/creo
+        if (payment.paymentType !== "FIX") {
           boxListForThisPayment = sharedBoxList
             ? sharedBoxList
             : await this.boxListsService.findBoxByDate(now, queryRunner.manager);
@@ -279,7 +416,6 @@ async updateReceipt(
               totalPrice: shouldAffectBox(payment.paymentType) ? total : 0,
             });
           } else {
-            // solo EF/CH suman al totalPrice
             if (shouldAffectBox(payment.paymentType)) {
               boxListForThisPayment.totalPrice += total;
               await this.boxListsService.updateBox(
@@ -290,7 +426,6 @@ async updateReceipt(
             }
           }
 
-          // guardo por si todavía no estaba seteado
           if (!sharedBoxList) sharedBoxList = boxListForThisPayment;
         }
 
@@ -299,68 +434,58 @@ async updateReceipt(
           price: total,
           paymentDate: now,
           receipt,
-          boxList: boxListForThisPayment ? ({ id: boxListForThisPayment.id } as BoxList) : null, // ✅ FIX => null
+          boxList: boxListForThisPayment ? ({ id: boxListForThisPayment.id } as BoxList) : null,
+          numberInBox: payment.paymentType === "FIX" ? null : total, // ✅ default (luego se ajusta si PRIVATE tiene cruce)
         });
-        await this.receiptPaymentRepository.save(newPayment);
+
+        const saved = await this.receiptPaymentRepository.save(newPayment);
+
+        // ✅ Solo para compensación: guardo los no-credit y no-fix del PRIVATE
+        if (payment.paymentType !== "FIX") {
+          privatePaymentsCreatedForCompensation.push(saved);
+        }
 
         receipt.price -= total;
         if (receipt.price <= 0) {
-          receipt.status = 'PAID';
+          receipt.status = "PAID";
           receipt.paymentDate = now;
         }
       }
 
-      // ✅ Si hay recibos OWNER pendientes, pagar 1 o 2 (los más viejos)
-      if (ownerPendingReceiptsToAutoPay.length > 0) {
-        // 💡 Determinar si el pago original del PRIVATE fue en efectivo
-        const privatePaidInCash = updateReceiptDto.payments.some((p) => p.paymentType === 'CASH');
+      // ✅ Compensación PRIVATE ↔ OWNER + numberInBox
+      if (customer.customerType === "PRIVATE" && ownerPendingReceiptsToAutoPay.length > 0) {
+        const privatePaidInCash = updateReceiptDto.payments.some((p) => p.paymentType === "CASH");
+        const paymentTypeForOwner = privatePaidInCash ? "MIX" : "TP";
 
-        // 💳 Si el private pagó en efectivo → MIX, sino → TP
-        const paymentTypeForOwner = privatePaidInCash ? 'MIX' : 'TP';
-
-        // ✅ Si el private NO fue FIX, linkeamos estos pagos al boxList del día para que APAREZCAN en BoxList/PDF
-        // ✅ Si el private fue FIX, boxList = null (no aparece en caja)
-        const ownerBoxListToUse =
-          privateHasFIX ? null : (sharedBoxList ? ({ id: sharedBoxList.id } as BoxList) : null);
-
-        for (const ownerReceipt of ownerPendingReceiptsToAutoPay) {
-          ownerReceipt.status = 'PAID';
-          ownerReceipt.paymentDate = now;
-
-          const newPayment = this.receiptPaymentRepository.create({
-            paymentType: paymentTypeForOwner as any,
-            price: ownerReceipt.price,
-            paymentDate: now,
-            receipt: ownerReceipt,
-            boxList: ownerBoxListToUse, // ✅ AHORA: aparece en boxlist si no es FIX
-          });
-
-          await this.receiptPaymentRepository.save(newPayment);
-          await queryRunner.manager.save(ownerReceipt);
-        }
+        await applyPrivateOwnerCompensation({
+          now,
+          privateHasFIX,
+          sharedBoxList,
+          privatePaymentsCreated: privatePaymentsCreatedForCompensation,
+          ownerPendingReceipts: ownerPendingReceiptsToAutoPay,
+          paymentTypeForOwner,
+        });
       }
     }
 
     // =========================================================
-    // 🧾 PAGOS A CUENTA
+    // 🧾 PAGOS A CUENTA (lo dejo como estaba)
     // =========================================================
     else {
-      const totalOnAccount = updateReceiptDto.payments
-        .reduce((sum, p) => sum + (p.price ?? 0), 0);
+      const totalOnAccount = updateReceiptDto.payments.reduce((sum, p) => sum + (p.price ?? 0), 0);
 
       if (totalOnAccount <= 0) {
-        throw new BadRequestException('El monto a cuenta debe ser mayor a 0.');
+        throw new BadRequestException("El monto a cuenta debe ser mayor a 0.");
       }
 
       if (totalOnAccount > receipt.price) {
-        throw new BadRequestException('El monto a cuenta no puede superar el saldo del recibo.');
+        throw new BadRequestException("El monto a cuenta no puede superar el saldo del recibo.");
       }
 
-      // ✅ Si es PRIVATE y hay OWNER, descontar el pago a cuenta del/los recibos más viejos del OWNER
-      if (customer.customerType === 'PRIVATE' && ownerToLink) {
+      if (customer.customerType === "PRIVATE" && ownerToLink) {
         const ownerAllPendings = await queryRunner.manager.find(Receipt, {
-          where: { customer: { id: ownerToLink.id }, status: 'PENDING' },
-          order: { startDate: 'ASC' },
+          where: { customer: { id: ownerToLink.id }, status: "PENDING" },
+          order: { startDate: "ASC" },
         });
 
         let remaining = totalOnAccount;
@@ -374,7 +499,7 @@ async updateReceipt(
 
           if (r.price <= 0) {
             r.price = 0;
-            r.status = 'PAID';
+            r.status = "PAID";
             r.paymentDate = now;
           }
 
@@ -385,11 +510,9 @@ async updateReceipt(
       for (const payment of updateReceiptDto.payments) {
         const total = payment.price ?? 0;
 
-        // ✅ FIX: NO registrar en BoxList (boxList = null)
-        // ✅ Normal: SIEMPRE registrar en BoxList
         let boxList: BoxList | null = null;
 
-        if (payment.paymentType !== 'FIX') {
+        if (payment.paymentType !== "FIX") {
           boxList = await this.boxListsService.findBoxByDate(now, queryRunner.manager);
 
           if (!boxList) {
@@ -414,7 +537,8 @@ async updateReceipt(
           price: total,
           paymentDate: now,
           receipt,
-          boxList: boxList ? ({ id: boxList.id } as BoxList) : null, // ✅ FIX => null
+          boxList: boxList ? ({ id: boxList.id } as BoxList) : null,
+          numberInBox: payment.paymentType === "FIX" ? null : total,
         });
 
         await this.receiptPaymentRepository.save(paymentOnAccount);
@@ -426,14 +550,14 @@ async updateReceipt(
     }
 
     // =========================================================
-    // 🪙 2. Actualizar deuda mensual (si aplica)
+    // 🪙 2. Actualizar deuda mensual (si aplica) (sin cambios)
     // =========================================================
     if (customer.monthsDebt && Array.isArray(customer.monthsDebt)) {
       const receiptMonth = receipt.startDate.slice(0, 7);
       const newMonthsDebt = customer.monthsDebt.map((debt) => {
         const debtMonth = debt.month.slice(0, 7);
-        if (debtMonth === receiptMonth && receipt.status === 'PAID') {
-          return { ...debt, status: 'PAID' };
+        if (debtMonth === receiptMonth && receipt.status === "PAID") {
+          return { ...debt, status: "PAID" };
         }
         return debt;
       });
@@ -441,8 +565,10 @@ async updateReceipt(
       const unpaidMonths = newMonthsDebt.filter((debt) => {
         const debtMonth = debt.month.slice(0, 7);
         const hasPaidReceipt =
-          debt.status === 'PAID' ||
-          customer.receipts?.some((r) => r.startDate.slice(0, 7) === debtMonth && r.status === 'PAID');
+          debt.status === "PAID" ||
+          customer.receipts?.some(
+            (r) => r.startDate.slice(0, 7) === debtMonth && r.status === "PAID"
+          );
         return !hasPaidReceipt;
       });
 
@@ -511,23 +637,24 @@ async cancelReceipt(receiptId: string, customerId: string) {
 
     if (!customer) throw new NotFoundException("Customer not found");
 
+    
+    const lastPaidReceipt = await queryRunner.manager.findOne(Receipt, {
+      where: { id: receiptId },
+      relations: ["payments", "paymentHistoryOnAccount"],
+    });
+    
     // ✅ Regla: OWNER no puede cancelar si tiene inquilino relacionado
     if (customer.customerType === "OWNER") {
       const hasRenterRelated = (customer.vehicles ?? []).some((v) => {
         return (v.vehicleRenters ?? []).length > 0;
       });
 
-      if (hasRenterRelated) {
+      if (hasRenterRelated && lastPaidReceipt.paymentType === 'MIX') {
         throw new BadRequestException(
           "No se puede cancelar porque tiene un inquilino relacionado",
         );
       }
     }
-
-    const lastPaidReceipt = await queryRunner.manager.findOne(Receipt, {
-      where: { id: receiptId },
-      relations: ["payments", "paymentHistoryOnAccount"],
-    });
 
     if (!lastPaidReceipt) throw new NotFoundException("Receipt not found");
 

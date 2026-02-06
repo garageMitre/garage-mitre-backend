@@ -16,6 +16,9 @@ export class ReceiptPayment {
   @Column('int', {nullable:true})
   price: number;
 
+  @Column('int', {nullable:true})
+  numberInBox: number;
+
   @Column('date', { nullable: true })
   paymentDate: string | null;
 
@@ -26,5 +29,5 @@ export class ReceiptPayment {
   boxList: BoxList;
 
   @CreateDateColumn()
-createdAt: Date;
+  createdAt: Date;
 }
