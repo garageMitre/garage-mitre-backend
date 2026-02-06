@@ -12,7 +12,7 @@ import * as dayjs from 'dayjs';
 import * as utc from 'dayjs/plugin/utc';
 import * as timezone from 'dayjs/plugin/timezone';
 import * as isBetween from 'dayjs/plugin/isBetween'; 
-import { Cron } from '@nestjs/schedule';
+import { LessThan } from "typeorm";
 import { ReceiptPayment } from './entities/receipt-payment.entity';
 import { PaymentHistoryOnAccount } from './entities/payment-history-on-account.entity';
 
@@ -144,14 +144,12 @@ async updateReceipt(
     privatePaymentsToUpdate: ReceiptPayment[],
     leftover: number
   ) => {
-    // seteo todo en 0 primero
     for (const p of privatePaymentsToUpdate) {
       p.numberInBox = 0;
     }
 
     let remaining = leftover;
 
-    // reparto en orden (podés cambiar a “último payment” si querés)
     for (const p of privatePaymentsToUpdate) {
       if (remaining <= 0) break;
 
@@ -174,13 +172,9 @@ async updateReceipt(
     privateHasFIX: boolean;
     sharedBoxList: BoxList | null;
 
-    // PRIVATE payments creados en este update (solo los que NO son CREDIT y NO son FIX)
     privatePaymentsCreated: ReceiptPayment[];
-
-    // recibos pendientes OWNER (ordenados FIFO)
     ownerPendingReceipts: Receipt[];
 
-    // tipo de pago que vas a guardar para OWNER ("MIX" o "TP")
     paymentTypeForOwner: "MIX" | "TP";
   }) => {
     const {
@@ -192,18 +186,15 @@ async updateReceipt(
       paymentTypeForOwner,
     } = args;
 
-    // Si el private pagó FIX, NO hay movimiento en caja ni se muestran movimientos en boxList
     if (privateHasFIX) {
-      // igual seteamos numberInBox = 0 en lo que haya (por prolijidad)
       for (const p of privatePaymentsCreated) p.numberInBox = 0;
       if (privatePaymentsCreated.length) await queryRunner.manager.save(privatePaymentsCreated);
       return;
     }
 
     if (!sharedBoxList) return;
+
     if (!ownerPendingReceipts?.length) {
-      // no hay owner → todo lo del private queda en boxlist como venía
-      // (si querés, acá podrías poner numberInBox = price, pero vos pediste que “solo cambie” cuando hay cruce)
       for (const p of privatePaymentsCreated) {
         p.numberInBox = Number(p.price ?? 0);
       }
@@ -211,28 +202,21 @@ async updateReceipt(
       return;
     }
 
-    // ✅ Total pagado por el private (no credit / no fix) en este update
     const privateTotalPaid = privatePaymentsCreated.reduce(
       (sum, p) => sum + Number(p.price ?? 0),
       0
     );
 
-    // ✅ Total deuda owner (sum de los receipt.price actuales)
     const ownerTotalDebt = ownerPendingReceipts.reduce(
       (sum, r) => sum + Number(r.price ?? 0),
       0
     );
 
-    // ✅ cuánto del private va a cubrir al owner
     let toAllocateToOwner = Math.min(privateTotalPaid, ownerTotalDebt);
-
-    // ✅ leftover del private (lo que “le sobra”)
     const privateLeftover = Math.max(0, privateTotalPaid - toAllocateToOwner);
 
-    // 🔥 numberInBox del PRIVATE = leftover (repartido entre sus payments creados)
     await distributeLeftoverAcrossPrivatePayments(privatePaymentsCreated, privateLeftover);
 
-    // ✅ Ahora aplico al owner FIFO (parcial permitido)
     for (const ownerReceipt of ownerPendingReceipts) {
       if (toAllocateToOwner <= 0) break;
 
@@ -242,19 +226,17 @@ async updateReceipt(
       const apply = Math.min(ownerCurrentDebt, toAllocateToOwner);
       toAllocateToOwner -= apply;
 
-      // ✅ creo ReceiptPayment del OWNER por lo aplicado (NO por el total)
       const ownerPayment = this.receiptPaymentRepository.create({
         paymentType: paymentTypeForOwner as any,
         price: apply,
         paymentDate: now,
         receipt: ownerReceipt,
-        boxList: { id: sharedBoxList.id } as BoxList, // ✅ aparece en boxlist
-        numberInBox: apply, // ✅ lo que se muestra
+        boxList: { id: sharedBoxList.id } as BoxList,
+        numberInBox: apply,
       });
 
       await this.receiptPaymentRepository.save(ownerPayment);
 
-      // ✅ Actualizo recibo owner (PAID si se cubre completo, si no queda PENDING con resto)
       const remainingDebt = ownerCurrentDebt - apply;
 
       if (remainingDebt <= 0) {
@@ -294,6 +276,14 @@ async updateReceipt(
     const now = argentinaTime.format("YYYY-MM-DD");
 
     // =========================================================
+    // ✅ NUEVO: primer día del mes actual (para NO pagar el mes actual)
+    // =========================================================
+    const firstDayOfCurrentMonth = dayjs()
+      .tz("America/Argentina/Buenos_Aires")
+      .startOf("month")
+      .format("YYYY-MM-DD");
+
+    // =========================================================
     // 🧭 Buscar recibos pendientes del OWNER si el customer es PRIVATE
     // =========================================================
     let ownerPendingReceiptsToAutoPay: Receipt[] = [];
@@ -315,9 +305,14 @@ async updateReceipt(
 
       if (owner) {
         const ownerPendings = await queryRunner.manager.find(Receipt, {
-          where: { customer: { id: owner.id }, status: "PENDING" },
-          order: { startDate: "ASC" }, // ✅ FIFO por startDate
-          take: 2, // ✅ vos querías 2 para manual
+          where: {
+            customer: { id: owner.id },
+            status: "PENDING",
+            // ✅ SOLO MESES ANTERIORES AL ACTUAL (no toca el mes en curso)
+            startDate: LessThan(firstDayOfCurrentMonth),
+          },
+          order: { startDate: "ASC" },
+          take: 2, // ✅ se mantiene: si hay 2+ viejos, trae 2 (pero SOLO viejos)
         });
 
         ownerPendingReceiptsToAutoPay = ownerPendings ?? [];
@@ -341,10 +336,8 @@ async updateReceipt(
         throw new BadRequestException("La suma de los montos no puede superar el total del recibo.");
       }
 
-      // ✅ Si el private paga con FIX en alguno de sus pagos, NO registramos nada en BoxList
       const privateHasFIX = updateReceiptDto.payments.some((p) => p.paymentType === "FIX");
 
-      // ✅ BoxList compartido del día (solo si NO hay FIX)
       let sharedBoxList: BoxList | null = null;
       if (!privateHasFIX) {
         sharedBoxList = await this.boxListsService.findBoxByDate(now, queryRunner.manager);
@@ -356,11 +349,9 @@ async updateReceipt(
         }
       }
 
-      // ✅ Vamos a guardar acá los payments creados del PRIVATE (para setear numberInBox después)
       const privatePaymentsCreatedForCompensation: ReceiptPayment[] = [];
 
       for (const payment of updateReceiptDto.payments) {
-        // 💳 Pago con crédito (lo dejás como venías)
         if (payment.paymentType === "CREDIT") {
           const creditToApply = Math.min(customer.credit ?? 0, receipt.price);
           if (creditToApply <= 0) {
@@ -384,7 +375,7 @@ async updateReceipt(
             paymentDate: now,
             receipt,
             boxList: { id: boxList.id } as BoxList,
-            numberInBox: creditToApply, // ✅ si querés que se muestre ese valor (si no, ponelo 0)
+            numberInBox: creditToApply,
           });
 
           await this.receiptPaymentRepository.save(creditPayment);
@@ -398,11 +389,8 @@ async updateReceipt(
           continue;
         }
 
-        // 💵 Pagos normales
         const total = payment.price ?? 0;
 
-        // ✅ FIX: boxList = null
-        // ✅ Normal: SIEMPRE link a boxList (aunque no afecte totalPrice)
         let boxListForThisPayment: BoxList | null = null;
 
         if (payment.paymentType !== "FIX") {
@@ -435,12 +423,11 @@ async updateReceipt(
           paymentDate: now,
           receipt,
           boxList: boxListForThisPayment ? ({ id: boxListForThisPayment.id } as BoxList) : null,
-          numberInBox: payment.paymentType === "FIX" ? null : total, // ✅ default (luego se ajusta si PRIVATE tiene cruce)
+          numberInBox: payment.paymentType === "FIX" ? null : total,
         });
 
         const saved = await this.receiptPaymentRepository.save(newPayment);
 
-        // ✅ Solo para compensación: guardo los no-credit y no-fix del PRIVATE
         if (payment.paymentType !== "FIX") {
           privatePaymentsCreatedForCompensation.push(saved);
         }
@@ -452,7 +439,6 @@ async updateReceipt(
         }
       }
 
-      // ✅ Compensación PRIVATE ↔ OWNER + numberInBox
       if (customer.customerType === "PRIVATE" && ownerPendingReceiptsToAutoPay.length > 0) {
         const privatePaidInCash = updateReceiptDto.payments.some((p) => p.paymentType === "CASH");
         const paymentTypeForOwner = privatePaidInCash ? "MIX" : "TP";
@@ -462,14 +448,14 @@ async updateReceipt(
           privateHasFIX,
           sharedBoxList,
           privatePaymentsCreated: privatePaymentsCreatedForCompensation,
-          ownerPendingReceipts: ownerPendingReceiptsToAutoPay,
+          ownerPendingReceipts: ownerPendingReceiptsToAutoPay, // ✅ ya viene filtrado (no mes actual)
           paymentTypeForOwner,
         });
       }
     }
 
     // =========================================================
-    // 🧾 PAGOS A CUENTA (lo dejo como estaba)
+    // 🧾 PAGOS A CUENTA (sin cambios)
     // =========================================================
     else {
       const totalOnAccount = updateReceiptDto.payments.reduce((sum, p) => sum + (p.price ?? 0), 0);
@@ -550,7 +536,7 @@ async updateReceipt(
     }
 
     // =========================================================
-    // 🪙 2. Actualizar deuda mensual (si aplica) (sin cambios)
+    // 🪙 2. Actualizar deuda mensual (sin cambios)
     // =========================================================
     if (customer.monthsDebt && Array.isArray(customer.monthsDebt)) {
       const receiptMonth = receipt.startDate.slice(0, 7);
