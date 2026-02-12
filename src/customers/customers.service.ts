@@ -627,11 +627,20 @@ async findAll(customerType: CustomerType) {
                   }
                 }
   
-                for(const receipt of pendingReceipts){
-                  receipt.price = vehicleDto.amountRenter
-                  receipt.startAmount = vehicleDto.amountRenter
-                  await queryRunner.manager.save(Receipt, receipt);
+                if (pendingReceipts.length > 0) {
+                  // ✅ solo el más reciente por startDate
+                  pendingReceipts.sort((a, b) =>
+                    String(b.startDate).localeCompare(String(a.startDate))
+                  );
+
+                  const lastPending = pendingReceipts[0];
+
+                  lastPending.price = vehicleDto.amountRenter;
+                  lastPending.startAmount = vehicleDto.amountRenter;
+
+                  await queryRunner.manager.save(Receipt, lastPending);
                 }
+
               }
 
             
@@ -765,17 +774,51 @@ async findAll(customerType: CustomerType) {
 
       customerRepo.merge(customer, customerData);
       const savedCustomer = await queryRunner.manager.save(customer);
-      for (const receipt of receipts) {
-        const receiptMonthStr = receipt.startDate.slice(0, 7);
+      const isRenterCustomer = customer.customerType === "RENTER";
 
-        const hasDebt = customer.monthsDebt.some(debt => {
-          const debtMonth = debt.month.slice(0, 7);
-          return debtMonth === receiptMonthStr;
+      if (isRenterCustomer) {
+        // ✅ SOLO el último pending (más reciente) que NO esté en monthsDebt
+        const monthsDebtSet = new Set(
+          (customer.monthsDebt || []).map((d) => String(d.month).slice(0, 7))
+        );
+
+        const pendingReceipts = await receiptRepo.find({
+          where: { customer: { id: customer.id }, status: "PENDING" },
+          order: { startDate: "DESC" }, // ✅ más reciente primero
         });
 
-        if (hasDebt) continue;
-        await queryRunner.manager.update(Receipt, receipt.id, { price, startAmount:price });
+        const lastPendingNotDebt = pendingReceipts.find((r) => {
+          const m = String(r.startDate).slice(0, 7);
+          return !monthsDebtSet.has(m);
+        });
+
+        if (lastPendingNotDebt) {
+          await queryRunner.manager.update(
+            Receipt,
+            lastPendingNotDebt.id,
+            { price, startAmount: price }
+          );
+        }
+      } else {
+        // ✅ comportamiento actual: actualizar todos los pendings que no estén en debt
+        for (const receipt of receipts) {
+          const receiptMonthStr = String(receipt.startDate).slice(0, 7);
+
+          const hasDebt = (customer.monthsDebt || []).some((debt) => {
+            const debtMonth = String(debt.month).slice(0, 7);
+            return debtMonth === receiptMonthStr;
+          });
+
+          if (hasDebt) continue;
+
+          await queryRunner.manager.update(
+            Receipt,
+            receipt.id,
+            { price, startAmount: price }
+          );
+        }
       }
+
 
 
       if (

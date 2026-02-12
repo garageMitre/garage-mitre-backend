@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, MoreThan, Not, Repository } from 'typeorm';
+import { DataSource, EntityManager, MoreThan, Not, Raw, Repository } from 'typeorm';
 import { BoxListsService } from 'src/box-lists/box-lists.service';
 import { BoxList } from 'src/box-lists/entities/box-list.entity';
 import { addMonths, startOfMonth } from 'date-fns';
@@ -275,13 +275,15 @@ async updateReceipt(
     const argentinaTime = dayjs().tz("America/Argentina/Buenos_Aires").startOf("day");
     const now = argentinaTime.format("YYYY-MM-DD");
 
-    // =========================================================
-    // ✅ NUEVO: primer día del mes actual (para NO pagar el mes actual)
-    // =========================================================
-    const firstDayOfCurrentMonth = dayjs()
-      .tz("America/Argentina/Buenos_Aires")
+    const tz = "America/Argentina/Buenos_Aires";
+    const privateNextMonthStartStr = dayjs(receipt.startDate)
+      .tz(tz)
       .startOf("month")
+      .add(1, "month")
       .format("YYYY-MM-DD");
+
+
+      
 
     // =========================================================
     // 🧭 Buscar recibos pendientes del OWNER si el customer es PRIVATE
@@ -308,13 +310,11 @@ async updateReceipt(
           where: {
             customer: { id: owner.id },
             status: "PENDING",
-            // ✅ SOLO MESES ANTERIORES AL ACTUAL (no toca el mes en curso)
-            startDate: LessThan(firstDayOfCurrentMonth),
+            startDate: Raw((alias) => `${alias} < :limit`, { limit: privateNextMonthStartStr }),
           },
           order: { startDate: "ASC" },
-          take: 2, // ✅ se mantiene: si hay 2+ viejos, trae 2 (pero SOLO viejos)
+          take: 2,
         });
-
         ownerPendingReceiptsToAutoPay = ownerPendings ?? [];
       }
     }
