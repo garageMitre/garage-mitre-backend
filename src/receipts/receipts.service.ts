@@ -340,11 +340,12 @@ async updateReceipt(
     const now = argentinaTime.format("YYYY-MM-DD");
 
     const tz = "America/Argentina/Buenos_Aires";
-    const privateNextMonthStartStr = dayjs(receipt.startDate)
-      .tz(tz)
-      .startOf("month")
+    // ✅ robusto: siempre toma el mes del receipt como YYYY-MM y construye el límite
+    const privateReceiptMonth = dayjs(receipt.startDate).format("YYYY-MM"); // sin tz
+    const privateNextMonthStartStr = dayjs(`${privateReceiptMonth}-01`)
       .add(1, "month")
       .format("YYYY-MM-DD");
+
 
     logPrivate(customer, "Fechas / límites", {
       now,
