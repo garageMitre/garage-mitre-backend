@@ -137,8 +137,20 @@ async updateReceipt(
     paymentType === "CASH" || paymentType === "CHECK";
 
   // =========================================================
+  // ✅ Helper: logs SOLO para PRIVATE
+  // =========================================================
+  const logPrivate = (customer: any, message: string, data?: any) => {
+    if (customer?.customerType !== "PRIVATE") return;
+
+    // ✅ si querés SOLO logger, borrá el console.log
+    console.log(`🔎 [updateReceipt:PRIVATE] ${message}`, data ?? "");
+    this.logger.log(
+      `[updateReceipt:PRIVATE] ${message}${data ? ` | ${JSON.stringify(data)}` : ""}`
+    );
+  };
+
+  // =========================================================
   // ✅ Helper: repartir leftover del PRIVATE en numberInBox
-  //    (sum(numberInBox) = leftover, nunca > price por payment)
   // =========================================================
   const distributeLeftoverAcrossPrivatePayments = async (
     privatePaymentsToUpdate: ReceiptPayment[],
@@ -176,6 +188,10 @@ async updateReceipt(
     ownerPendingReceipts: Receipt[];
 
     paymentTypeForOwner: "MIX" | "TP";
+
+    // ✅ para logs
+    customer: Customer;
+    ownerId?: string | null;
   }) => {
     const {
       now,
@@ -184,17 +200,34 @@ async updateReceipt(
       privatePaymentsCreated,
       ownerPendingReceipts,
       paymentTypeForOwner,
+      customer,
+      ownerId,
     } = args;
 
+    logPrivate(customer, "Entró a applyPrivateOwnerCompensation()", {
+      now,
+      privateHasFIX,
+      sharedBoxListId: sharedBoxList?.id ?? null,
+      privatePaymentsCreatedCount: privatePaymentsCreated.length,
+      ownerPendingReceiptsCount: ownerPendingReceipts.length,
+      paymentTypeForOwner,
+      ownerId,
+    });
+
     if (privateHasFIX) {
+      logPrivate(customer, "privateHasFIX=true => no compensa, numberInBox=0 en pagos private");
       for (const p of privatePaymentsCreated) p.numberInBox = 0;
       if (privatePaymentsCreated.length) await queryRunner.manager.save(privatePaymentsCreated);
       return;
     }
 
-    if (!sharedBoxList) return;
+    if (!sharedBoxList) {
+      logPrivate(customer, "No sharedBoxList => no compensa (return)");
+      return;
+    }
 
     if (!ownerPendingReceipts?.length) {
+      logPrivate(customer, "Owner no tiene pendings => numberInBox del private = price");
       for (const p of privatePaymentsCreated) {
         p.numberInBox = Number(p.price ?? 0);
       }
@@ -215,6 +248,14 @@ async updateReceipt(
     let toAllocateToOwner = Math.min(privateTotalPaid, ownerTotalDebt);
     const privateLeftover = Math.max(0, privateTotalPaid - toAllocateToOwner);
 
+    logPrivate(customer, "Cálculos iniciales", {
+      privateTotalPaid,
+      ownerTotalDebt,
+      toAllocateToOwner,
+      privateLeftover,
+      ownerPendingMonths: ownerPendingReceipts.map(r => String(r.startDate).slice(0, 7)),
+    });
+
     await distributeLeftoverAcrossPrivatePayments(privatePaymentsCreated, privateLeftover);
 
     for (const ownerReceipt of ownerPendingReceipts) {
@@ -225,6 +266,14 @@ async updateReceipt(
 
       const apply = Math.min(ownerCurrentDebt, toAllocateToOwner);
       toAllocateToOwner -= apply;
+
+      logPrivate(customer, "Aplicando al OWNER (FIFO)", {
+        ownerReceiptId: ownerReceipt.id,
+        ownerReceiptMonth: String(ownerReceipt.startDate).slice(0, 7),
+        ownerCurrentDebt,
+        apply,
+        remainingToAllocate: toAllocateToOwner,
+      });
 
       const ownerPayment = this.receiptPaymentRepository.create({
         paymentType: paymentTypeForOwner as any,
@@ -243,14 +292,27 @@ async updateReceipt(
         ownerReceipt.price = 0;
         ownerReceipt.status = "PAID";
         ownerReceipt.paymentDate = now;
+        logPrivate(customer, "OWNER receipt quedó PAID", {
+          ownerReceiptId: ownerReceipt.id,
+          month: String(ownerReceipt.startDate).slice(0, 7),
+        });
       } else {
         ownerReceipt.price = remainingDebt;
         ownerReceipt.status = "PENDING";
         ownerReceipt.paymentDate = null;
+        logPrivate(customer, "OWNER receipt quedó PENDING (parcial)", {
+          ownerReceiptId: ownerReceipt.id,
+          month: String(ownerReceipt.startDate).slice(0, 7),
+          remainingDebt,
+        });
       }
 
       await queryRunner.manager.save(ownerReceipt);
     }
+
+    logPrivate(customer, "Fin applyPrivateOwnerCompensation()", {
+      leftoverPrivate: privateLeftover,
+    });
   };
 
   try {
@@ -262,6 +324,8 @@ async updateReceipt(
       relations: ["receipts"],
     });
     if (!customer) throw new NotFoundException("Customer not found");
+
+    logPrivate(customer, "Inicio updateReceipt()", { receiptId, customerId });
 
     const receipt = !updateReceiptDto.barcode
       ? await queryRunner.manager.findOne(Receipt, { where: { id: receiptId } })
@@ -282,8 +346,12 @@ async updateReceipt(
       .add(1, "month")
       .format("YYYY-MM-DD");
 
-
-      
+    logPrivate(customer, "Fechas / límites", {
+      now,
+      privateReceiptStartDate: receipt.startDate,
+      privateNextMonthStartStr,
+      privateReceiptMonth: String(receipt.startDate).slice(0, 7),
+    });
 
     // =========================================================
     // 🧭 Buscar recibos pendientes del OWNER si el customer es PRIVATE
@@ -305,6 +373,11 @@ async updateReceipt(
       const owner = receiptWithRelations?.customer?.vehicleRenters?.[0]?.vehicle?.customer;
       ownerToLink = owner ?? null;
 
+      logPrivate(customer, "Owner relacionado detectado", {
+        ownerId: owner?.id ?? null,
+        ownerName: owner ? `${owner.lastName ?? ""} ${owner.firstName ?? ""}`.trim() : null,
+      });
+
       if (owner) {
         const ownerPendings = await queryRunner.manager.find(Receipt, {
           where: {
@@ -315,7 +388,13 @@ async updateReceipt(
           order: { startDate: "ASC" },
           take: 2,
         });
+
         ownerPendingReceiptsToAutoPay = ownerPendings ?? [];
+
+        logPrivate(customer, "Owner pendings filtrados para autopago", {
+          count: ownerPendingReceiptsToAutoPay.length,
+          months: ownerPendingReceiptsToAutoPay.map(r => String(r.startDate).slice(0, 7)),
+        });
       }
     }
 
@@ -323,6 +402,13 @@ async updateReceipt(
     // 🧾 PAGOS MANUALES (efectivo / crédito)
     // =========================================================
     if (updateReceiptDto.onAccount === false) {
+      logPrivate(customer, "Ruta: PAGOS MANUALES", {
+        payments: (updateReceiptDto.payments ?? []).map(p => ({
+          type: p.paymentType,
+          price: p.price ?? 0,
+        })),
+      });
+
       const totalWithoutCredit = updateReceiptDto.payments
         .filter((p) => p.paymentType !== "CREDIT")
         .reduce((sum, p) => sum + (p.price ?? 0), 0);
@@ -338,6 +424,14 @@ async updateReceipt(
 
       const privateHasFIX = updateReceiptDto.payments.some((p) => p.paymentType === "FIX");
 
+      logPrivate(customer, "Totales manuales", {
+        totalWithoutCredit,
+        creditToUse,
+        totalToPay,
+        privateHasFIX,
+        receiptPriceBefore: receipt.price,
+      });
+
       let sharedBoxList: BoxList | null = null;
       if (!privateHasFIX) {
         sharedBoxList = await this.boxListsService.findBoxByDate(now, queryRunner.manager);
@@ -349,10 +443,15 @@ async updateReceipt(
         }
       }
 
+      logPrivate(customer, "BoxList compartida", {
+        sharedBoxListId: sharedBoxList?.id ?? null,
+      });
+
       const privatePaymentsCreatedForCompensation: ReceiptPayment[] = [];
 
       for (const payment of updateReceiptDto.payments) {
         if (payment.paymentType === "CREDIT") {
+          // ... (sin cambios)
           const creditToApply = Math.min(customer.credit ?? 0, receipt.price);
           if (creditToApply <= 0) {
             throw new BadRequestException("El cliente no tiene crédito disponible.");
@@ -386,6 +485,14 @@ async updateReceipt(
             receipt.status = "PAID";
             receipt.paymentDate = now;
           }
+
+          logPrivate(customer, "Aplicó CREDIT", {
+            creditToApply,
+            newCredit,
+            receiptPriceAfter: receipt.price,
+            receiptStatus: receipt.status,
+          });
+
           continue;
         }
 
@@ -437,6 +544,21 @@ async updateReceipt(
           receipt.status = "PAID";
           receipt.paymentDate = now;
         }
+
+        logPrivate(customer, "Creó pago normal", {
+          type: payment.paymentType,
+          total,
+          savedPaymentId: saved.id,
+          receiptPriceAfter: receipt.price,
+          receiptStatus: receipt.status,
+        });
+      }
+
+      if (customer.customerType === "PRIVATE") {
+        logPrivate(customer, "Previo a compensación PRIVATE->OWNER", {
+          privatePaymentsCreatedCount: privatePaymentsCreatedForCompensation.length,
+          ownerPendingsCount: ownerPendingReceiptsToAutoPay.length,
+        });
       }
 
       if (customer.customerType === "PRIVATE" && ownerPendingReceiptsToAutoPay.length > 0) {
@@ -448,16 +570,24 @@ async updateReceipt(
           privateHasFIX,
           sharedBoxList,
           privatePaymentsCreated: privatePaymentsCreatedForCompensation,
-          ownerPendingReceipts: ownerPendingReceiptsToAutoPay, // ✅ ya viene filtrado (no mes actual)
+          ownerPendingReceipts: ownerPendingReceiptsToAutoPay,
           paymentTypeForOwner,
+
+          customer,
+          ownerId: ownerToLink?.id ?? null,
         });
       }
-    }
+    } else {
+      // =========================================================
+      // 🧾 PAGOS A CUENTA (sin cambios)
+      // =========================================================
+      logPrivate(customer, "Ruta: PAGOS A CUENTA", {
+        payments: (updateReceiptDto.payments ?? []).map(p => ({
+          type: p.paymentType,
+          price: p.price ?? 0,
+        })),
+      });
 
-    // =========================================================
-    // 🧾 PAGOS A CUENTA (sin cambios)
-    // =========================================================
-    else {
       const totalOnAccount = updateReceiptDto.payments.reduce((sum, p) => sum + (p.price ?? 0), 0);
 
       if (totalOnAccount <= 0) {
@@ -472,6 +602,12 @@ async updateReceipt(
         const ownerAllPendings = await queryRunner.manager.find(Receipt, {
           where: { customer: { id: ownerToLink.id }, status: "PENDING" },
           order: { startDate: "ASC" },
+        });
+
+        logPrivate(customer, "Owner pendings (a cuenta) encontrados", {
+          count: ownerAllPendings.length,
+          months: ownerAllPendings.map(r => String(r.startDate).slice(0, 7)),
+          totalOnAccount,
         });
 
         let remaining = totalOnAccount;
@@ -490,6 +626,15 @@ async updateReceipt(
           }
 
           await queryRunner.manager.save(r);
+
+          logPrivate(customer, "Aplicó a cuenta al OWNER", {
+            ownerReceiptId: r.id,
+            month: String(r.startDate).slice(0, 7),
+            apply,
+            remaining,
+            newStatus: r.status,
+            newPrice: r.price,
+          });
         }
       }
 
@@ -578,6 +723,11 @@ async updateReceipt(
         paymentDate: receipt.paymentDate,
       }
     );
+
+    logPrivate(customer, "Final updateReceipt() OK", {
+      finalReceiptPrice: receipt.price,
+      finalReceiptStatus: receipt.status,
+    });
 
     await queryRunner.commitTransaction();
     return receipt;
