@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -12,7 +12,7 @@ RUN apt-get update -o Acquire::ForceIPv4=true -o Acquire::Retries=5 \
 
 WORKDIR /app
 
-# habilita corepack (viene con node 20) para usar pnpm
+# habilita corepack (viene con node 22) para usar pnpm
 RUN corepack enable
 
 # copiar manifests y lock de pnpm
