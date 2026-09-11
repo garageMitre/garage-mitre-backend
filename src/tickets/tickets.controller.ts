@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
 import { TicketsService } from './tickets.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { Paginate, Paginated, PaginateQuery } from 'nestjs-paginate';
@@ -10,11 +10,29 @@ import { TicketPrice } from './entities/ticket-price.entity';
 import { CreateTicketPriceDto } from './dto/create-ticket-price.dto';
 import { UpdateTicketPriceDto } from './dto/update-ticket-price.dto';
 import { TicketRegistrationForDay } from './entities/ticket-registration-for-day.entity';
+import { TicketPriceBracket } from './entities/ticket-price-bracket.entity';
+import { CreateTicketPriceBracketDto } from './dto/create-ticket-price-bracket.dto';
+import { UpdateTicketPriceBracketDto } from './dto/update-ticket-price-bracket.dto';
+import { UpdateTicketScheduleDto } from './dto/update-ticket-schedule.dto';
+import { AddAdvancePaymentDto } from './dto/add-advance-payment.dto';
+import { SetPaymentMethodDto } from './dto/set-payment-method.dto';
 
 @Controller('tickets')
 @UseGuards(AuthOrTokenAuthGuard)
 export class TicketsController {
   constructor(private readonly ticketsService: TicketsService) {}
+
+  // Declaradas antes de las rutas con ":id" — si no, Nest/Express matchea
+  // "schedule-settings" como si fuera un :id de ticket.
+  @Get('schedule-settings')
+  getSchedule() {
+    return this.ticketsService.getSchedule();
+  }
+
+  @Patch('schedule-settings')
+  updateSchedule(@Body() updateTicketScheduleDto: UpdateTicketScheduleDto) {
+    return this.ticketsService.updateSchedule(updateTicketScheduleDto);
+  }
 
   @Post()
   create(@Body() createTicketDto: CreateTicketDto) {
@@ -78,14 +96,49 @@ export class TicketsController {
     return this.ticketsService.removeTicketPrice(id);
   }
 
+  @Post('priceBrackets')
+  createPriceBracket(@Body() createTicketPriceBracketDto: CreateTicketPriceBracketDto) {
+    return this.ticketsService.createPriceBracket(createTicketPriceBracketDto);
+  }
+
+  @Get('priceBrackets')
+  findAllPriceBrackets(@Query('vehicleType') vehicleType?: string): Promise<TicketPriceBracket[]> {
+    return this.ticketsService.findAllPriceBrackets(vehicleType);
+  }
+
+  @Patch('priceBrackets/:id')
+  updatePriceBracket(@Param('id') id: string, @Body() updateTicketPriceBracketDto: UpdateTicketPriceBracketDto) {
+    return this.ticketsService.updatePriceBracket(id, updateTicketPriceBracketDto);
+  }
+
+  @Delete('priceBrackets/:id')
+  removePriceBracket(@Param('id') id: string) {
+    return this.ticketsService.removePriceBracket(id);
+  }
+
   @Get('registrations')
   findAllRegistrations() {
     return this.ticketsService.findAllRegistrations();
   }
 
+  @Get('registrations/hourly-activity')
+  getHourlyActivity(@Query('date') date?: string) {
+    return this.ticketsService.getHourlyActivity(date);
+  }
+
   @Get('registrations/:id')
   findOne(@Param('id') id: string) {
     return this.ticketsService.findOneRegistration(id);
+  }
+
+  @Patch('registrations/:id/advance-payment')
+  addAdvancePayment(@Param('id') id: string, @Body() dto: AddAdvancePaymentDto) {
+    return this.ticketsService.addAdvancePayment(id, dto);
+  }
+
+  @Patch('registrations/:id/payment-method')
+  setPaymentMethod(@Param('id') id: string, @Body() dto: SetPaymentMethodDto) {
+    return this.ticketsService.setPaymentMethod(id, dto);
   }
 
   @Post('simulation/:barId')

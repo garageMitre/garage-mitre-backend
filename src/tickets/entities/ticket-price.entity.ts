@@ -8,7 +8,7 @@ import { TICKET_DAY_TYPE, TicketDayType } from './ticket.entity';
 export const VEHICLE_TYPE = ['AUTO', 'CAMIONETA'] as const;
 export type VehicleType = (typeof VEHICLE_TYPE)[number];
 
-export const TICKET_TIME_TYPE = ['DIA', 'SEMANA','SEMANA_Y_DIA'] as const;
+export const TICKET_TIME_TYPE = ['DIA', 'SEMANA', 'SEMANA_Y_DIA', 'MES', 'MES_Y_DIA'] as const;
 export type TicketTimeType = (typeof TICKET_TIME_TYPE)[number];
 
 @Entity({ name: 'tickets-price' })

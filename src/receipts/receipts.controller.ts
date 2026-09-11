@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, Body, Patch, UseGuards, Delete } from '@nestjs/common';
+import { Controller, Get, Param, Post, Body, Patch, Query, UseGuards, Delete } from '@nestjs/common';
 import { ReceiptsService } from './receipts.service';
 import { UpdateReceiptDto } from './dto/update-receipt.dto';
 import { CustomerType } from 'src/customers/entities/customer.entity';
@@ -24,14 +24,19 @@ export class ReceiptsController {
         return await this.receiptsService.cancelReceipt(receiptId, customerId);
     }
 
+    @Get('summary')
+    async getReceiptsSummary(@Query('from') from?: string, @Query('to') to?: string) {
+        return await this.receiptsService.getReceiptsSummary(from, to);
+    }
+
     @Get(':customerType')
     async findAllPendingReceipts( @Param('customerType') customer: CustomerType) {
         return await this.receiptsService.findAllPendingReceipts(customer);
     }
 
     @Get()
-    async findReceipts() {
-        return await this.receiptsService.findReceipts();
+    async findReceipts(@Query('from') from?: string, @Query('to') to?: string) {
+        return await this.receiptsService.findReceipts(from, to);
     }
 
 

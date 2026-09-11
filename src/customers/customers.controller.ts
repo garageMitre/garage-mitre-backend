@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Query, Delete, UseGuards } from '@nestjs/common';
 import { Paginate, Paginated, PaginateQuery } from 'nestjs-paginate';
 import { CustomersService } from './customers.service';
 import { CreateCustomerDto, CreateVehicleDto } from './dto/create-customer.dto';
@@ -35,6 +35,11 @@ export class CustomersController {
   @Get('thirds')
   async getCustomerthird() {
     return await this.customersService.getCustomerthird();
+  }
+
+  @Get('summary')
+  async getCustomersSummary(@Query('from') from?: string, @Query('to') to?: string) {
+    return await this.customersService.getCustomersSummary(from, to);
   }
 
   @Get(':id')

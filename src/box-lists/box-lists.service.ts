@@ -82,6 +82,93 @@ async createBox(createBoxListDto: CreateBoxListDto) {
       this.logger.error(error.message, error.stack);
     }
   }
+
+  private getDefaultRange() {
+    const argentinaNow = dayjs().tz('America/Argentina/Buenos_Aires');
+    return {
+      from: argentinaNow.startOf('month').format('YYYY-MM-DD'),
+      to: argentinaNow.format('YYYY-MM-DD'),
+    };
+  }
+
+  async getRevenueSummary(from?: string, to?: string, groupBy: 'day' | 'month' = 'day') {
+    try {
+      const defaults = this.getDefaultRange();
+      const rangeFrom = from ?? defaults.from;
+      const rangeTo = to ?? defaults.to;
+
+      const bucketExpr = groupBy === 'month'
+        ? "TO_CHAR(box.date::date, 'YYYY-MM')"
+        : "TO_CHAR(box.date::date, 'YYYY-MM-DD')";
+
+      const rows = await this.boxListRepository
+        .createQueryBuilder('box')
+        .select(bucketExpr, 'bucket')
+        .addSelect('SUM(box.totalPrice)', 'total')
+        .where('box.date BETWEEN :from AND :to', { from: rangeFrom, to: rangeTo })
+        .groupBy('bucket')
+        .orderBy('bucket', 'ASC')
+        .getRawMany();
+
+      return {
+        from: rangeFrom,
+        to: rangeTo,
+        groupBy,
+        series: rows.map((r) => ({ bucket: r.bucket as string, total: Number(r.total) })),
+      };
+    } catch (error: any) {
+      this.logger.error(error.message, error.stack);
+      throw error;
+    }
+  }
+
+  async getOtherPaymentsSummary(from?: string, to?: string, groupBy: 'day' | 'month' = 'day') {
+    try {
+      const defaults = this.getDefaultRange();
+      const rangeFrom = from ?? defaults.from;
+      const rangeTo = to ?? defaults.to;
+
+      const byTypeRows = await this.otherPaymentepository
+        .createQueryBuilder('other_payment')
+        .select('other_payment.type', 'type')
+        .addSelect('SUM(other_payment.price)', 'total')
+        .addSelect('COUNT(*)', 'count')
+        .where('other_payment.dateNow BETWEEN :from AND :to', { from: rangeFrom, to: rangeTo })
+        .andWhere('other_payment.type IS NOT NULL')
+        .groupBy('other_payment.type')
+        .getRawMany();
+
+      const bucketExpr = groupBy === 'month'
+        ? `TO_CHAR(other_payment."dateNow"::date, 'YYYY-MM')`
+        : `TO_CHAR(other_payment."dateNow"::date, 'YYYY-MM-DD')`;
+
+      const seriesRows = await this.otherPaymentepository
+        .createQueryBuilder('other_payment')
+        .select(bucketExpr, 'bucket')
+        .addSelect("SUM(CASE WHEN other_payment.type = 'INGRESOS' THEN other_payment.price ELSE 0 END)", 'ingresos')
+        .addSelect("SUM(CASE WHEN other_payment.type = 'EGRESOS' THEN other_payment.price ELSE 0 END)", 'egresos')
+        .where('other_payment.dateNow BETWEEN :from AND :to', { from: rangeFrom, to: rangeTo })
+        .groupBy('bucket')
+        .orderBy('bucket', 'ASC')
+        .getRawMany();
+
+      return {
+        from: rangeFrom,
+        to: rangeTo,
+        groupBy,
+        byType: byTypeRows.map((r) => ({ type: r.type as string, total: Number(r.total), count: Number(r.count) })),
+        series: seriesRows.map((r) => ({
+          bucket: r.bucket as string,
+          ingresos: Number(r.ingresos),
+          egresos: Number(r.egresos),
+        })),
+      };
+    } catch (error: any) {
+      this.logger.error(error.message, error.stack);
+      throw error;
+    }
+  }
+
   async updateBox(id: string, updateBoxListDto: UpdateBoxListDto, manager?: EntityManager) {
     try {
       const repo = manager ? manager.getRepository(BoxList) : this.boxListRepository;

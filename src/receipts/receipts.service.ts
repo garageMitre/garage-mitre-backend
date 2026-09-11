@@ -37,6 +37,49 @@ export class ReceiptsService {
         private readonly dataSource: DataSource,
     ) {}
 
+    async getReceiptsSummary(from?: string, to?: string) {
+      try {
+        const argentinaNow = dayjs().tz('America/Argentina/Buenos_Aires');
+        const rangeFrom = from ?? argentinaNow.startOf('month').format('YYYY-MM-DD');
+        const rangeTo = to ?? argentinaNow.format('YYYY-MM-DD');
+
+        const byStatusRows = await this.receiptRepository
+          .createQueryBuilder('receipt')
+          .select('receipt.status', 'status')
+          .addSelect('COUNT(*)', 'count')
+          .addSelect('SUM(receipt.price)', 'total')
+          .where('receipt.dateNow BETWEEN :from AND :to', { from: rangeFrom, to: rangeTo })
+          .groupBy('receipt.status')
+          .getRawMany();
+
+        // La forma de pago real vive en ReceiptPayment (un recibo puede tener varios
+        // pagos parciales con distinto medio) — Receipt.paymentType casi nunca se completa.
+        const byPaymentTypeRows = await this.receiptPaymentRepository
+          .createQueryBuilder('rp')
+          .select('rp.paymentType', 'paymentType')
+          .addSelect('COUNT(*)', 'count')
+          .addSelect('SUM(rp.price)', 'total')
+          .where('rp.paymentDate BETWEEN :from AND :to', { from: rangeFrom, to: rangeTo })
+          .andWhere('rp.paymentType IS NOT NULL')
+          .groupBy('rp.paymentType')
+          .getRawMany();
+
+        return {
+          from: rangeFrom,
+          to: rangeTo,
+          byStatus: byStatusRows.map((r) => ({ status: r.status as string, count: Number(r.count), total: Number(r.total) })),
+          byPaymentType: byPaymentTypeRows.map((r) => ({
+            paymentType: r.paymentType as string | null,
+            count: Number(r.count),
+            total: Number(r.total),
+          })),
+        };
+      } catch (error: any) {
+        this.logger.error(error.message, error.stack);
+        throw error;
+      }
+    }
+
 async createReceipt(customerId: string, manager: EntityManager, price?: number, dateNow?: string, dateNowForDebt?: string): Promise<Receipt> {
   try {
 
@@ -1029,32 +1072,29 @@ async createReceiptMan(dateNowFront: string, customerType: CustomerType): Promis
 
 
 
+    // A pesar del nombre (histórico — lo usa drop-menu-actions.tsx para chequear "¿ya se
+    // generaron recibos este mes?"), esto tiene que traer TODOS los recibos del tipo de cliente,
+    // no solo los PENDING: los diálogos de exportar (Clientes/Recibos) filtran por "pagó / no
+    // pagó" del lado del cliente, así que si acá ya se descartan los pagados, ese filtro nunca
+    // puede mostrar nada como pagado y un recibo ya cobrado desaparece como si no existiera.
+    // Antes además se armaba recorriendo `customer.receipts`, que no deja el `receipt.customer`
+    // cargado — cualquier lectura de `receipt.customer.*` del lado del cliente rompía o, con la
+    // guarda defensiva agregada ahí, descartaba en silencio recibos que sí existían.
     async findAllPendingReceipts(customerType: CustomerType) {
       try {
-        const customers = await this.customerRepository.find({
-          where: { customerType: customerType },
-          relations: ['receipts'],
-          withDeleted: true
+        const receipts = await this.receiptRepository.find({
+          where: { customer: { customerType } },
+          relations: [
+            'customer',
+            'customer.vehicleRenters',
+            'customer.vehicleRenters.vehicle',
+            'customer.vehicleRenters.vehicle.customer',
+          ],
+          withDeleted: true,
+          order: { createdAt: 'DESC' },
         });
-    
-        // Array para almacenar los recibos pendientes de todos los clientes
-        const pendingReceipts = [];
-    
-        for (const customer of customers) {
-          const receipts = customer.receipts.sort(
-            (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
-          );
-    
-          // Filtrar solo los recibos con estado 'PENDING'
-          const customerPendingReceipts = receipts.filter(
-            (receipt) => receipt.status === 'PENDING'
-          );
-    
-          // Agregar los recibos pendientes al array general
-          pendingReceipts.push(...customerPendingReceipts);
-        }
-    
-        return pendingReceipts;
+
+        return receipts;
       } catch (error: any) {
         if (!(error instanceof NotFoundException)) {
           this.logger.error(error.message, error.stack);
@@ -1089,9 +1129,13 @@ async createReceiptMan(dateNowFront: string, customerType: CustomerType): Promis
       }
     }
 
-    async findReceipts(){
+    async findReceipts(from?: string, to?: string){
       try{
-        const receipts = await this.receiptRepository.find({relations: ['payments', 'customer','customer.vehicleRenters', 'customer.vehicleRenters.vehicle', 'customer.vehicleRenters.vehicle.customer']})
+        const receipts = await this.receiptRepository.find({
+          where: from && to ? { dateNow: Raw((alias) => `${alias} BETWEEN :from AND :to`, { from, to }) } : {},
+          relations: ['payments', 'customer','customer.vehicleRenters', 'customer.vehicleRenters.vehicle', 'customer.vehicleRenters.vehicle.customer'],
+          order: { dateNow: 'DESC' },
+        })
 
         return receipts;
       } catch (error: any) {

@@ -18,7 +18,7 @@ export class ScannerService {
     
   ) {}
 
-  async start(scannerDto?: ScannerDto): Promise<{ success: boolean; message: string; type?: string; id?:string, barcode?: string, receipt?: Receipt, receiptId?: string }> {
+  async start(scannerDto?: ScannerDto): Promise<{ success: boolean; message: string; type?: string; id?:string, barcode?: string, receipt?: Receipt, receiptId?: string, registration?: any }> {
     if (this.isScanning) {
       return { success: false, message: 'El escáner ya está en ejecución.' };
     }
@@ -58,6 +58,7 @@ export class ScannerService {
             success: true,
             message: 'Registro de ticket creado exitosamente.',
             type: 'TICKET',
+            registration,
           };
         } else {
           this.logger.warn('No se pudo registrar el ticket.');
@@ -97,7 +98,7 @@ export class ScannerService {
     } catch (error: any) {
       this.logger.error('Error al procesar el código de barras:', error);
       this.isScanning = false;
-      return { success: false, message: 'Error al procesar el código de barras.' };
+      return { success: false, message: error?.message || 'Error al procesar el código de barras.' };
     } finally {
     await queryRunner.release();
   }
