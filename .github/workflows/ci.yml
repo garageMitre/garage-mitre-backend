@@ -1,0 +1,122 @@
+name: CI/CD
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+# Si se pushea dos veces seguidas a la misma rama, cancela la corrida anterior.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # CI — corre en cada push y en cada PR. Es la barrera antes de producción.
+  # ---------------------------------------------------------------------------
+  test:
+    name: Lint, build y tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [22.x]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Historia completa: el chequeo de rama actualizada necesita poder
+          # calcular el merge-base contra la rama destino.
+          fetch-depth: 0
+
+      # Evita que un PR pase en verde sobre código que nunca se probó junto con
+      # lo último de la rama destino — el clásico "andaba en mi PR y rompió al
+      # mergear".
+      - name: Verificar que la rama esté actualizada
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          BASE_BRANCH="origin/${{ github.base_ref }}"
+          MERGE_BASE=$(git merge-base $BASE_BRANCH HEAD)
+          BASE_HEAD=$(git rev-parse $BASE_BRANCH)
+
+          if [ "$MERGE_BASE" != "$BASE_HEAD" ]; then
+            echo "⚠️ La rama quedó atrás de ${{ github.base_ref }}"
+            echo "Actualizala con los últimos cambios antes de mergear."
+            exit 1
+          else
+            echo "✅ La rama está actualizada con ${{ github.base_ref }}"
+          fi
+
+      - name: Instalar pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - name: Instalar Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          # Cachea el store de pnpm entre corridas, con la key derivada del
+          # pnpm-lock.yaml.
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+        env:
+          # puppeteer se usa solo para generar PDFs en runtime; bajar Chromium acá
+          # son ~150 MB y un par de minutos que el CI no necesita.
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+
+      - name: Lint
+        run: pnpm lint:ci
+
+      - name: Build
+        run: pnpm build
+
+      - name: Tests
+        run: pnpm test
+
+  # ---------------------------------------------------------------------------
+  # CD — solo si el CI pasó. Cada rama va a su propio servicio de Railway:
+  # la rama de pruebas al entorno de pruebas, main a producción. Un push a
+  # cualquier otra rama corre los tests pero no despliega.
+  # ---------------------------------------------------------------------------
+  deploy-pruebas:
+    name: Deploy a pruebas
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/ticket-price-brackets-and-reports'
+    runs-on: ubuntu-latest
+    environment: pruebas
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Desplegar
+        run: railway up --service "$RAILWAY_SERVICE" --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRUEBAS }}
+          RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE_PRUEBAS }}
+
+  deploy-produccion:
+    name: Deploy a producción
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Desplegar
+        run: railway up --service "$RAILWAY_SERVICE" --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
