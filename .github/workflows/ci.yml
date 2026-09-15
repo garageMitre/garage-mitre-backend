@@ -79,44 +79,41 @@ jobs:
         run: pnpm test
 
   # ---------------------------------------------------------------------------
-  # CD — solo si el CI pasó. Cada rama va a su propio servicio de Railway:
-  # la rama de pruebas al entorno de pruebas, main a producción. Un push a
-  # cualquier otra rama corre los tests pero no despliega.
+  # CD — solo si el CI pasó. Hay un único servicio de backend en Railway, así
+  # que hay un único job de deploy, disparado por la rama que ese servicio
+  # sigue. Para sumar un segundo entorno se duplica este job cambiando la rama
+  # del `if` y el par de secrets.
   # ---------------------------------------------------------------------------
-  deploy-pruebas:
-    name: Deploy a pruebas
+  deploy:
+    name: Deploy a Railway
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/feat/ticket-price-brackets-and-reports'
     runs-on: ubuntu-latest
-    environment: pruebas
+
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVICE }}
 
     steps:
       - uses: actions/checkout@v4
+
+      # Sin esto, un secret faltante llega al CLI como string vacío y Railway
+      # responde "Invalid RAILWAY_TOKEN", que no distingue entre "no cargaste
+      # el secret" y "el token no sirve". Solo imprime el largo, nunca el valor.
+      - name: Verificar credenciales
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::falta el secret RAILWAY_TOKEN"
+            exit 1
+          fi
+          if [ -z "$RAILWAY_SERVICE" ]; then
+            echo "::error::falta el secret RAILWAY_SERVICE"
+            exit 1
+          fi
+          echo "token presente (${#RAILWAY_TOKEN} caracteres)"
 
       - name: Instalar Railway CLI
         run: npm install -g @railway/cli
 
       - name: Desplegar
         run: railway up --service "$RAILWAY_SERVICE" --detach
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRUEBAS }}
-          RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE_PRUEBAS }}
-
-  deploy-produccion:
-    name: Deploy a producción
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: production
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Instalar Railway CLI
-        run: npm install -g @railway/cli
-
-      - name: Desplegar
-        run: railway up --service "$RAILWAY_SERVICE" --detach
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
