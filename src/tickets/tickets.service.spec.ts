@@ -104,4 +104,64 @@ describe('TicketsService · precio de salida', () => {
       usedFallback: false,
     });
   });
+
+  it('no deja cobrar si no hay ninguna franja configurada', async () => {
+    const service = buildService([]);
+
+    // Es preferible frenar la salida con un mensaje claro al operador antes
+    // que cobrar $0 en silencio.
+    await expect(precioDeSalida(service, 45)).rejects.toMatchObject({
+      response: { code: 'TICKET_PRICE_BRACKET_NOT_FOUND' },
+    });
+  });
+
+  it('cobra por bloques desde cero si la única franja es la recurrente', async () => {
+    const service = buildService([POR_DIA]);
+
+    // Sin escalera previa no hay sobre qué acumular, así que se cuenta desde
+    // el minuto 0: 1500 min = 2 bloques de día (1440 c/u) = $10000.
+    await expect(precioDeSalida(service, 1500)).resolves.toMatchObject({
+      price: 10000,
+    });
+  });
+});
+
+describe('TicketsService · clasificación de franjas', () => {
+  const service = buildService([]);
+  const clasificar = (minutos: number) => (service as any).classifyBracketTier(minutos);
+
+  it('separa minutos, horas y días por divisibilidad exacta', () => {
+    expect(clasificar(30)).toBe('MIN');
+    expect(clasificar(60)).toBe('HOUR');
+    expect(clasificar(120)).toBe('HOUR');
+    expect(clasificar(1440)).toBe('DAY');
+  });
+
+  it('trata como MIN una franja que no cae en una hora justa', () => {
+    // 90 min supera la hora pero no es múltiplo de 60: cuenta como escala de
+    // minutos. De esto depende contra qué franjas se descompone la cascada.
+    expect(clasificar(90)).toBe('MIN');
+  });
+});
+
+describe('TicketsService · precio de la unidad recurrente', () => {
+  const service = buildService([]);
+  const precioUnitario = (unidadMinutos: number, franjas: TicketPriceBracket[]) =>
+    (service as any).resolveRecurringUnitPrice(unidadMinutos, franjas);
+
+  it('usa el precio tal cual si la unidad coincide con el techo de otra franja', () => {
+    // "cada 1 hora" con una franja "hasta 1 hora" de $1500 cobra $1500.
+    expect(precioUnitario(60, ESCALERA)).toBe(1500);
+  });
+
+  it('deriva el precio en proporción a una franja de escala mayor', () => {
+    // "cada 1 minuto" sin franja de 1 min: toma "hasta 1 hora" ($1500) y lo
+    // divide por 60.
+    expect(precioUnitario(1, [HASTA_1_HORA])).toBe(25);
+  });
+
+  it('devuelve null si no hay ninguna franja de escala mayor en qué apoyarse', () => {
+    // El llamador cae entonces al precio cargado a mano en la franja.
+    expect(precioUnitario(1440, ESCALERA)).toBeNull();
+  });
 });
