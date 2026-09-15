@@ -11,7 +11,8 @@ import { UpdateReceiptDto } from './dto/update-receipt.dto';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
-import isBetween from 'dayjs/plugin/isBetween'; 
+import isBetween from 'dayjs/plugin/isBetween';
+import 'dayjs/locale/es';
 import { LessThan } from "typeorm";
 import { ReceiptPayment } from './entities/receipt-payment.entity';
 import { PaymentHistoryOnAccount } from './entities/payment-history-on-account.entity';
@@ -378,6 +379,28 @@ async updateReceipt(
 
     if (!receipt) throw new NotFoundException("Receipt not found");
     if (receipt.status === "PAID") throw new BadRequestException("Receipt already paid");
+
+    // No se puede pagar un mes salteando deudas más viejas del mismo cliente — si septiembre
+    // se intenta pagar con agosto todavía pendiente, cortamos acá antes de tocar caja/compensación.
+    const olderPendingReceipts = await queryRunner.manager.find(Receipt, {
+      where: {
+        customer: { id: customerId },
+        status: "PENDING",
+        id: Not(receipt.id),
+        startDate: Raw((alias) => `${alias} < :receiptStart`, { receiptStart: receipt.startDate }),
+      },
+      order: { startDate: "ASC" },
+    });
+
+    if (olderPendingReceipts.length > 0) {
+      const monthLabels = olderPendingReceipts.map((r) => {
+        const label = dayjs(r.startDate).locale("es").format("MMMM YYYY");
+        return label.charAt(0).toUpperCase() + label.slice(1);
+      });
+      throw new BadRequestException(
+        `No se puede pagar este recibo: hay deudas anteriores sin pagar (${monthLabels.join(", ")}). Pagalas primero.`,
+      );
+    }
 
     const argentinaTime = dayjs().tz("America/Argentina/Buenos_Aires").startOf("day");
     const now = argentinaTime.format("YYYY-MM-DD");

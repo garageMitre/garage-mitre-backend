@@ -65,6 +65,13 @@ export class TicketsController {
     return this.ticketsService.updateTicketStatus(id, dto);
   }
 
+  // Declarada antes de ':id/status' de forma explícita solo por legibilidad — el shape del
+  // path (2 segmentos fijos vs. uno con :id en el medio) ya evita cualquier ambigüedad de ruteo.
+  @Patch('registrationForDays/retire-many')
+  retireManyRegistrationForDay(@Body('ids') ids: string[]) {
+    return this.ticketsService.retireRegistrationsForDay(ids);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.ticketsService.remove(id);

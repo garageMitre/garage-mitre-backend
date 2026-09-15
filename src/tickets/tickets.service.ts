@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { Ticket } from './entities/ticket.entity';
 import { TicketRegistration } from './entities/ticket-registration.entity';
 import { CreateTicketDto } from './dto/create-ticket.dto';
@@ -803,6 +803,19 @@ async createRegistrationForDay(createTicketRegistrationForDayDto: CreateTicketRe
     }
 
     return this.ticketRegistrationForDayRepository.save(ticket);
+  }
+
+  // Limpieza masiva del panel "Día/Sem/Mes": solo marca `retired` (los saca de la lista de
+  // ocupación), nunca toca `paid` / la caja — eso es una acción separada e independiente.
+  async retireRegistrationsForDay(ids: string[]) {
+    if (!ids || ids.length === 0) {
+      return { affected: 0 };
+    }
+    const result = await this.ticketRegistrationForDayRepository.update(
+      { id: In(ids) },
+      { retired: true },
+    );
+    return { affected: result.affected ?? 0 };
   }
 
     async removeRegistrationForDay(id: string) {
