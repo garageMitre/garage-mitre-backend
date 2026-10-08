@@ -1,5 +1,7 @@
 import { TicketsService } from './tickets.service';
 import { TicketPriceBracket } from './entities/ticket-price-bracket.entity';
+import { TicketScheduleSettings } from './entities/ticket-schedule-settings.entity';
+import { defaultPricingOptions } from './pricing/pricing.types';
 
 // Tests de la escalera de precios de salida: es la lógica que define cuánta plata se
 // cobra, y la única parte del servicio que no depende de la base más allá de leer las
@@ -20,17 +22,42 @@ const bracket = (seed: BracketSeed): TicketPriceBracket =>
     ...seed,
   }) as TicketPriceBracket;
 
-const HASTA_30_MIN = bracket({ label: 'Hasta 30 min', uptoMinutes: 30, price: 1000 });
-const HASTA_1_HORA = bracket({ label: 'Hasta 1 hora', uptoMinutes: 60, price: 1500 });
-const HASTA_2_HORAS = bracket({ label: 'Hasta 2 horas', uptoMinutes: 120, price: 2800 });
-const POR_DIA = bracket({ label: 'Por día', uptoMinutes: null, price: 5000, recurringUnitMinutes: 1440 });
+const HASTA_30_MIN = bracket({
+  label: 'Hasta 30 min',
+  uptoMinutes: 30,
+  price: 1000,
+});
+const HASTA_1_HORA = bracket({
+  label: 'Hasta 1 hora',
+  uptoMinutes: 60,
+  price: 1500,
+});
+const HASTA_2_HORAS = bracket({
+  label: 'Hasta 2 horas',
+  uptoMinutes: 120,
+  price: 2800,
+});
+const POR_DIA = bracket({
+  label: 'Por día',
+  uptoMinutes: null,
+  price: 5000,
+  recurringUnitMinutes: 1440,
+});
 
 const ESCALERA = [HASTA_30_MIN, HASTA_1_HORA, HASTA_2_HORAS];
 
-const buildService = (brackets: TicketPriceBracket[]): TicketsService => {
-  const ticketPriceBracketRepository = { find: jest.fn().mockResolvedValue(brackets) };
-  // Sin fila de configuración, getSchedule cae en el default: graceMinutes = 5.
-  const ticketScheduleSettingsRepository = { find: jest.fn().mockResolvedValue([]) };
+const buildService = (
+  brackets: TicketPriceBracket[],
+  scheduleRows: Partial<TicketScheduleSettings>[] = [],
+): TicketsService => {
+  const ticketPriceBracketRepository = {
+    find: jest.fn().mockResolvedValue(brackets),
+    count: jest.fn().mockResolvedValue(brackets.length),
+  };
+  // Sin fila de configuración, getSchedule cae en el default: graceMinutes = 5 y lista de precios.
+  const ticketScheduleSettingsRepository = {
+    find: jest.fn().mockResolvedValue(scheduleRows),
+  };
 
   return new TicketsService(
     null as any,
@@ -44,11 +71,19 @@ const buildService = (brackets: TicketPriceBracket[]): TicketsService => {
   );
 };
 
+// Mediodía en Argentina: horario diurno con la configuración por defecto (8 a 20).
+const ENTRADA = new Date('2026-01-05T12:00:00-03:00');
+
 const precioDeSalida = (service: TicketsService, elapsedMinutes: number) =>
-  (service as any).resolveExitPrice('AUTO', 'DAY', elapsedMinutes) as Promise<{
+  (service as any).resolveExitPrice(
+    'AUTO',
+    ENTRADA,
+    new Date(ENTRADA.getTime() + elapsedMinutes * 60000),
+  ) as Promise<{
     price: number;
     label: string;
     usedFallback: boolean;
+    ticketDayType: 'DAY' | 'NIGHT';
   }>;
 
 describe('TicketsService · precio de salida', () => {
@@ -126,42 +161,111 @@ describe('TicketsService · precio de salida', () => {
   });
 });
 
-describe('TicketsService · clasificación de franjas', () => {
-  const service = buildService([]);
-  const clasificar = (minutos: number) => (service as any).classifyBracketTier(minutos);
+describe('TicketsService · precio de la unidad recurrente', () => {
+  const recurrente = (unidadMinutos: number) =>
+    bracket({
+      label: 'Adicional',
+      uptoMinutes: null,
+      price: 999,
+      recurringUnitMinutes: unidadMinutos,
+    });
 
-  it('separa minutos, horas y días por divisibilidad exacta', () => {
-    expect(clasificar(30)).toBe('MIN');
-    expect(clasificar(60)).toBe('HOUR');
-    expect(clasificar(120)).toBe('HOUR');
-    expect(clasificar(1440)).toBe('DAY');
+  it('usa el precio tal cual si la unidad coincide con el techo de otra franja', async () => {
+    // "cada 1 hora" con una franja "hasta 1 hora" de $1500: 3 h = $1500 + 2 × $1500.
+    const service = buildService([HASTA_1_HORA, recurrente(60)]);
+
+    await expect(precioDeSalida(service, 180)).resolves.toMatchObject({
+      price: 4500,
+    });
   });
 
-  it('trata como MIN una franja que no cae en una hora justa', () => {
-    // 90 min supera la hora pero no es múltiplo de 60: cuenta como escala de
-    // minutos. De esto depende contra qué franjas se descompone la cascada.
-    expect(clasificar(90)).toBe('MIN');
+  it('deriva el precio en proporción a una franja de escala mayor', async () => {
+    // "cada 1 minuto" sin franja de 1 min: toma "hasta 1 hora" ($1500 / 60 = $25).
+    // 70 min = $1500 + 10 × $25.
+    const service = buildService([HASTA_1_HORA, recurrente(1)]);
+
+    await expect(precioDeSalida(service, 70)).resolves.toMatchObject({
+      price: 1750,
+    });
+  });
+
+  it('usa el precio cargado si es FIXED, aunque haya una franja equivalente', async () => {
+    const service = buildService([
+      HASTA_1_HORA,
+      { ...recurrente(60), recurringPriceMode: 'FIXED' } as TicketPriceBracket,
+    ]);
+
+    await expect(precioDeSalida(service, 180)).resolves.toMatchObject({
+      price: 1500 + 2 * 999,
+    });
   });
 });
 
-describe('TicketsService · precio de la unidad recurrente', () => {
-  const service = buildService([]);
-  const precioUnitario = (unidadMinutos: number, franjas: TicketPriceBracket[]) =>
-    (service as any).resolveRecurringUnitPrice(unidadMinutos, franjas);
+describe('TicketsService · cobro por hora o fracción', () => {
+  const porFraccion = (
+    rates: { vehicleType: string; dayPrice: number; nightPrice: number }[],
+  ) => [
+    {
+      dayStartHour: 8,
+      dayEndHour: 20,
+      graceMinutes: 5,
+      pricingDayTypeBasis: 'EXIT' as const,
+      pricingOptions: {
+        ...defaultPricingOptions(),
+        charging: {
+          enabled: true,
+          mode: 'STARTED' as const,
+          unitMinutes: 60,
+          rates,
+        },
+      },
+    },
+  ];
 
-  it('usa el precio tal cual si la unidad coincide con el techo de otra franja', () => {
-    // "cada 1 hora" con una franja "hasta 1 hora" de $1500 cobra $1500.
-    expect(precioUnitario(60, ESCALERA)).toBe(1500);
+  it('cobra cada período iniciado, después de la tolerancia', async () => {
+    // Las franjas cargadas se ignoran: manda la forma de cobro elegida.
+    const service = buildService(
+      ESCALERA,
+      porFraccion([{ vehicleType: 'AUTO', dayPrice: 1000, nightPrice: 1400 }]),
+    );
+
+    await expect(precioDeSalida(service, 64)).resolves.toMatchObject({
+      price: 1000,
+    });
+    await expect(precioDeSalida(service, 66)).resolves.toMatchObject({
+      price: 2000,
+      ticketDayType: 'DAY',
+    });
   });
 
-  it('deriva el precio en proporción a una franja de escala mayor', () => {
-    // "cada 1 minuto" sin franja de 1 min: toma "hasta 1 hora" ($1500) y lo
-    // divide por 60.
-    expect(precioUnitario(1, [HASTA_1_HORA])).toBe(25);
+  it('usa el precio de noche según la hora de salida', async () => {
+    const service = buildService(
+      [],
+      porFraccion([{ vehicleType: 'AUTO', dayPrice: 1000, nightPrice: 1400 }]),
+    );
+
+    // Entra 12:00, sale 21:00: toda la estadía al precio de noche (9 períodos).
+    await expect(precioDeSalida(service, 540)).resolves.toMatchObject({
+      price: 9 * 1400,
+      ticketDayType: 'NIGHT',
+    });
   });
 
-  it('devuelve null si no hay ninguna franja de escala mayor en qué apoyarse', () => {
-    // El llamador cae entonces al precio cargado a mano en la franja.
-    expect(precioUnitario(1440, ESCALERA)).toBeNull();
+  it('frena el ingreso si el vehículo no tiene precio por período', async () => {
+    const service = buildService(
+      ESCALERA,
+      porFraccion([
+        { vehicleType: 'CAMIONETA', dayPrice: 1000, nightPrice: 1000 },
+      ]),
+    );
+
+    await expect(
+      (service as any).ensureBracketsConfigured('AUTO'),
+    ).rejects.toMatchObject({
+      response: { code: 'TICKET_PRICE_BRACKET_NOT_FOUND' },
+    });
+    await expect(
+      (service as any).ensureBracketsConfigured('CAMIONETA'),
+    ).resolves.toBeUndefined();
   });
 });

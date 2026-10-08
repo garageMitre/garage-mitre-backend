@@ -10,6 +10,7 @@ import { TicketRegistrationForDay } from './entities/ticket-registration-for-day
 import { TicketPrice } from './entities/ticket-price.entity';
 import { TicketPriceBracket } from './entities/ticket-price-bracket.entity';
 import { TicketScheduleSettings } from './entities/ticket-schedule-settings.entity';
+import { TariffPlanService } from './tariff-plan.service';
 
 @Module({
   imports: [
@@ -24,7 +25,7 @@ import { TicketScheduleSettings } from './entities/ticket-schedule-settings.enti
     BoxListsModule,
   ],
   controllers: [TicketsController],
-  providers: [TicketsService, TicketGateway],
+  providers: [TicketsService, TariffPlanService, TicketGateway],
   exports: [TicketsService]
 })
 export class TicketsModule {}

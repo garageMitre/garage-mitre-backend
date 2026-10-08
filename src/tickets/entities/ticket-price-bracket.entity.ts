@@ -1,5 +1,6 @@
 import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 import { TICKET_DAY_TYPE, TicketDayType, TICKET_TYPE, TicketType } from './ticket.entity';
+import { RecurringPriceMode } from '../pricing/pricing.types';
 
 @Entity({ name: 'ticket_price_brackets' })
 export class TicketPriceBracket {
@@ -30,6 +31,12 @@ export class TicketPriceBracket {
 
   @Column('int', { nullable: true })
   recurringUnitMinutes: number | null;
+
+  // FIXED cobra `price` por cada unidad recurrente; DERIVED la calcula con las otras franjas
+  // (el cálculo de siempre). Las franjas que ya existían quedan en DERIVED para no cambiar lo
+  // que se cobra; las nuevas del editor de tarifas usan FIXED.
+  @Column('varchar', { length: 10, default: 'DERIVED' })
+  recurringPriceMode: RecurringPriceMode;
 
   @CreateDateColumn()
   createdAt: Date;

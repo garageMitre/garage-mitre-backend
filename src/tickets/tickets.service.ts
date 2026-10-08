@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository } from 'typeorm';
+import { EntityManager, In, IsNull, Repository } from 'typeorm';
 import { Ticket } from './entities/ticket.entity';
 import { TicketRegistration } from './entities/ticket-registration.entity';
 import { CreateTicketDto } from './dto/create-ticket.dto';
@@ -30,16 +30,27 @@ import { UpdateTicketPriceBracketDto } from './dto/update-ticket-price-bracket.d
 import { UpdateTicketScheduleDto } from './dto/update-ticket-schedule.dto';
 import { AddAdvancePaymentDto } from './dto/add-advance-payment.dto';
 import { SetPaymentMethodDto } from './dto/set-payment-method.dto';
+import { defaultPricingOptions, PricingBracket, PricingOptions, PricingSchedule, PricingSnapshot } from './pricing/pricing.types';
+import { resolveDayType } from './pricing/pricing';
+import { calculateStayPrice } from './pricing/stay-pricing';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 dayjs.extend(isBetween);
 
-// Escala de una franja según su "hasta" en minutos — se infiere del número (no hace falta
-// guardar la unidad aparte): múltiplo de 1440 = días, múltiplo de 60 = horas, el resto minutos.
-// Coincide con el criterio que ya usa el frontend (minutesToAmountUnit) para clasificar franjas.
-type PriceBracketTier = 'MIN' | 'HOUR' | 'DAY';
-const PRICE_BRACKET_TIER_RANK: Record<PriceBracketTier, number> = { MIN: 0, HOUR: 1, DAY: 2 };
+export type TicketSchedule = PricingSchedule & { barcodeTicketsEnabled: boolean; pricingOptions: PricingOptions };
+
+// Las franjas guardadas antes de que existiera recurringPriceMode se calculan como siempre (DERIVED).
+export const toPricingBracket = (row: Omit<Partial<TicketPriceBracket>, 'vehicleType'> & Pick<PricingBracket, 'id' | 'vehicleType' | 'label' | 'price'>): PricingBracket => ({
+  id: row.id,
+  vehicleType: row.vehicleType,
+  ticketDayType: row.ticketDayType ?? null,
+  label: row.label,
+  uptoMinutes: row.uptoMinutes ?? null,
+  price: row.price,
+  recurringUnitMinutes: row.recurringUnitMinutes ?? null,
+  recurringPriceMode: row.recurringPriceMode ?? 'DERIVED',
+});
 
 @Injectable()
 export class TicketsService {
@@ -64,23 +75,45 @@ export class TicketsService {
 
   private readonly defaultTicketSchedule = { dayStartHour: 8, dayEndHour: 20, graceMinutes: 5, barcodeTicketsEnabled: true };
 
-  async getSchedule(): Promise<{ dayStartHour: number; dayEndHour: number; graceMinutes: number; barcodeTicketsEnabled: boolean }> {
+  // Devuelve siempre la configuración completa: una fila guardada antes de que existieran la
+  // forma de cobro y el cruce de horarios se lee como lista de precios con la hora de salida,
+  // que es exactamente como cobraba el garage hasta entonces.
+  async getSchedule(manager?: EntityManager): Promise<TicketSchedule> {
     try {
-      const [latest] = await this.ticketScheduleSettingsRepository.find({
+      const repository = manager ? manager.getRepository(TicketScheduleSettings) : this.ticketScheduleSettingsRepository;
+      const [latest] = await repository.find({
         order: { updatedAt: 'DESC' },
         take: 1,
       });
-      return latest ?? this.defaultTicketSchedule;
+      const stored = latest ?? this.defaultTicketSchedule;
+      const options = (stored as Partial<TicketScheduleSettings>).pricingOptions;
+      const defaults = defaultPricingOptions();
+      return {
+        dayStartHour: stored.dayStartHour,
+        dayEndHour: stored.dayEndHour,
+        graceMinutes: stored.graceMinutes ?? 5,
+        barcodeTicketsEnabled: stored.barcodeTicketsEnabled ?? true,
+        pricingDayTypeBasis: (stored as Partial<TicketScheduleSettings>).pricingDayTypeBasis ?? 'EXIT',
+        pricingOptions: {
+          charging: options?.charging ?? defaults.charging,
+          stay: options?.stay ?? defaults.stay,
+          crossing: options?.crossing ?? defaults.crossing,
+        },
+      };
     } catch (error: any) {
       this.logger.error(error.message, error.stack);
       throw error;
     }
   }
 
+  // Edita una sola fila y conserva lo que el formulario no manda: la forma de cobro y el cruce
+  // de horarios se guardan desde el editor de tarifas y no se pueden perder por guardar el horario.
   async updateSchedule(updateTicketScheduleDto: UpdateTicketScheduleDto) {
     try {
-      await this.ticketScheduleSettingsRepository.clear();
-      const schedule = this.ticketScheduleSettingsRepository.create(updateTicketScheduleDto);
+      const [stored] = await this.ticketScheduleSettingsRepository.find({ order: { updatedAt: 'DESC' }, take: 1 });
+      const schedule = stored
+        ? this.ticketScheduleSettingsRepository.merge(stored, updateTicketScheduleDto)
+        : this.ticketScheduleSettingsRepository.create(updateTicketScheduleDto);
       return await this.ticketScheduleSettingsRepository.save(schedule);
     } catch (error: any) {
       this.logger.error(error.message, error.stack);
@@ -88,230 +121,68 @@ export class TicketsService {
     }
   }
 
-  private resolveTicketDayType(
-    schedule: { dayStartHour: number; dayEndHour: number },
-    hour: number,
-  ): TicketDayType {
-    const { dayStartHour, dayEndHour } = schedule;
-    const isDay =
-      dayStartHour < dayEndHour
-        ? hour >= dayStartHour && hour < dayEndHour
-        : hour >= dayStartHour || hour < dayEndHour;
-    return isDay ? 'DAY' : 'NIGHT';
-  }
-
-  private async resolveCurrentTicketDayType(): Promise<TicketDayType> {
-    const schedule = await this.getSchedule();
-    const currentHour = dayjs().tz('America/Argentina/Buenos_Aires').hour();
-    return this.resolveTicketDayType(schedule, currentHour);
-  }
-
-  // Corta el escaneo (entrada o salida) si todavía no hay ninguna franja de precio cargada
-  // para ese tipo de vehículo — sin tarifas no hay forma de cobrar la estadía después.
+  // Corta el escaneo de entrada si todavía no hay precios para ese tipo de vehículo con la forma
+  // de cobro elegida — sin tarifas no hay forma de cobrar la estadía después.
   private async ensureBracketsConfigured(vehicleType: string): Promise<void> {
-    const count = await this.ticketPriceBracketRepository.count({ where: { vehicleType: vehicleType as any } });
-    if (count === 0) {
+    const { pricingOptions } = await this.getSchedule();
+    const configured = pricingOptions.charging.enabled
+      ? pricingOptions.charging.rates.some((rate) => rate.vehicleType === vehicleType)
+      : (await this.ticketPriceBracketRepository.count({ where: { vehicleType: vehicleType as any } })) > 0;
+    if (!configured) {
       throw new NotFoundException({
         code: 'TICKET_PRICE_BRACKET_NOT_FOUND',
-        message: `No hay tarifas configuradas para el tipo de vehículo ${vehicleType}. Pedile al admin que cargue al menos una franja de precio en Tarifas antes de escanear.`,
+        message: `No hay tarifas configuradas para el tipo de vehículo ${vehicleType}. Pedile al admin que cargue los precios en Tickets → Por tiempo antes de escanear.`,
       });
     }
   }
 
-  private classifyBracketTier(uptoMinutes: number): PriceBracketTier {
-    if (uptoMinutes >= 1440 && uptoMinutes % 1440 === 0) return 'DAY';
-    if (uptoMinutes >= 60 && uptoMinutes % 60 === 0) return 'HOUR';
-    return 'MIN';
-  }
-
-  // Resuelve el precio final de una estadía según el tiempo transcurrido, en cascada por escala
-  // (minutos → horas → días, según qué franjas haya configuradas). Al superar toda la escalera de
-  // minutos, en vez de saltar directo al precio pleno de la franja de horas que "cubre" el total,
-  // se cobra la última franja de horas ya completada más el resultado de re-aplicar la escalera de
-  // minutos sobre el excedente — y así de nuevo al pasar de horas a días. Si el tiempo transcurrido
-  // cae justo en el techo de una franja (dentro de la tolerancia), se cobra esa franja de forma
-  // plana sin descomponer. Si solo hay franjas de una escala (ej. solo por días), el comportamiento
-  // es el de siempre: no hay nada más chico en qué descomponer. Si el tiempo transcurrido supera
-  // todas las franjas configuradas, se cobra la más alta (nunca se bloquea la salida) y se marca
-  // usedFallback para advertir al operador y quedar en el log.
+  // Precio final de una estadía con la configuración vigente: el mismo cálculo que usa el
+  // simulador del admin (src/tickets/pricing/stay-pricing.ts). Con lista de precios descompone
+  // en cascada por escala (minutos → horas → días) y, si la estadía supera todas las duraciones
+  // sin una regla posterior, cobra la última y marca usedFallback (nunca se bloquea la salida);
+  // por hora o fracción cobra cada período iniciado, respetando la tolerancia.
   private async resolveExitPrice(
     vehicleType: string,
-    ticketDayType: TicketDayType,
-    elapsedMinutes: number,
-  ): Promise<{ price: number; label: string; usedFallback: boolean }> {
-    const brackets = await this.ticketPriceBracketRepository.find({
-      where: [
-        { vehicleType: vehicleType as any, ticketDayType: ticketDayType as any },
-        { vehicleType: vehicleType as any, ticketDayType: IsNull() },
-      ],
-    });
-
-    if (brackets.length === 0) {
-      throw new NotFoundException({
-        code: 'TICKET_PRICE_BRACKET_NOT_FOUND',
-        message: `No hay tarifas configuradas para el tipo de vehículo ${vehicleType}. Pedile al admin que cargue al menos una franja de precio en Tarifas antes de registrar salidas.`,
-      });
-    }
-
-    const finite = brackets
-      .filter((b) => b.uptoMinutes !== null)
-      .sort((a, b) => a.uptoMinutes! - b.uptoMinutes!);
-    const openEnded = brackets.find((b) => b.uptoMinutes === null) ?? null;
-
+    entryAt: Date,
+    exitAt: Date,
+  ): Promise<{ price: number; label: string; usedFallback: boolean; ticketDayType: TicketDayType }> {
     const schedule = await this.getSchedule();
-    const graceMinutes = schedule.graceMinutes ?? 5;
-
-    if (finite.length === 0) {
-      // Solo existe la franja "sin límite" — no hay escalera previa, se cobra directo (sin cambios).
-      return { ...this.priceBracketAmount(openEnded!, elapsedMinutes, null, finite), usedFallback: false };
+    const brackets = await this.ticketPriceBracketRepository.find({ where: { vehicleType: vehicleType as any } });
+    const snapshot: PricingSnapshot = {
+      version: 1,
+      capturedAt: new Date().toISOString(),
+      schedule,
+      brackets: brackets.map((row) => toPricingBracket(row)),
+    };
+    const result = calculateStayPrice(snapshot, vehicleType, entryAt, exitAt);
+    if (result.usedFallback) {
+      this.logger.warn(
+        `Estadía de ${result.elapsedMinutes} min (${vehicleType}) superó todas las duraciones configuradas; se cobró la última. Conviene definir qué cobrar después de la última duración en Tarifas.`,
+      );
     }
-
-    const lastBracket = finite[finite.length - 1];
-
-    let previous: TicketPriceBracket | null = null;
-    for (const bracket of finite) {
-      // La tolerancia solo tiene sentido como gracia antes de saltar a la franja SIGUIENTE.
-      // La última franja con techo no tiene una franja siguiente a la que "no saltar todavía"
-      // (salvo que haya una franja sin límite después), así que ahí no se aplica: pasarse de su
-      // "hasta", aunque sea por poco, ya cuenta como estadía sin cobertura y dispara el aviso.
-      const isLastWithCeiling = bracket === lastBracket && !openEnded;
-      const threshold = isLastWithCeiling ? bracket.uptoMinutes! : bracket.uptoMinutes! + graceMinutes;
-      if (elapsedMinutes <= threshold) {
-        const resolved = this.resolveBracketOrCascade(bracket, previous, elapsedMinutes, graceMinutes, finite);
-        return { ...resolved, usedFallback: false };
-      }
-      previous = bracket;
-    }
-
-    this.logger.warn(
-      `Estadía de ${elapsedMinutes} min (${vehicleType}/${ticketDayType}) superó todas las franjas configuradas; se cobró la última ("${lastBracket.label}"). Conviene dejar la última franja de Tarifas sin "hasta".`,
-    );
-    if (openEnded) {
-      return { ...this.priceBracketAmount(openEnded, elapsedMinutes, previous, finite), usedFallback: false };
-    }
-    return { price: lastBracket.price, label: lastBracket.label, usedFallback: true };
+    const mixed = result.ticketDayType === 'MIXED';
+    // Con los tramos separados la estadía no es de día ni de noche: el ticket guarda el horario
+    // de la salida, como antes.
+    const ticketDayType: TicketDayType = result.ticketDayType === 'MIXED'
+      ? resolveDayType(schedule, dayjs(exitAt).tz('America/Argentina/Buenos_Aires').hour())
+      : result.ticketDayType;
+    const lines = result.breakdown.filter((line) => line.amount !== 0);
+    const label = lines.length
+      ? lines
+          .map((line) => {
+            const units = line.units !== undefined ? ` (${Number(line.units.toFixed(2))} × $${line.unitPrice})` : '';
+            const day = mixed && line.dayType ? ` · ${line.dayType === 'DAY' ? 'día' : 'noche'}` : '';
+            return `${line.label}${units}${day}`;
+          })
+          .join(' + ')
+      : result.label;
+    return { price: result.price, label, usedFallback: result.usedFallback, ticketDayType };
   }
 
-  // Dentro de la franja que "cubre" el tiempo transcurrido (`covering`), decide si cobrarla de
-  // forma plana o si hay que descomponer en cascada: si el tiempo transcurrido está bien por
-  // debajo de su techo (más allá de la tolerancia) pero ya superó una franja anterior de una
-  // escala más chica (ej. superó "Hasta 1 hora" pero no llega a "Hasta 2 horas"), se cobra esa
-  // franja anterior más el resultado de re-aplicar la escalera de la escala más chica sobre el
-  // excedente, en vez de cobrar el precio pleno de `covering`.
-  private resolveBracketOrCascade(
-    covering: TicketPriceBracket,
-    previous: TicketPriceBracket | null,
-    elapsedMinutes: number,
-    graceMinutes: number,
-    allFinite: TicketPriceBracket[],
-  ): { price: number; label: string } {
-    const gapToCeiling = Math.abs(covering.uptoMinutes! - elapsedMinutes);
-    if (previous === null || gapToCeiling <= graceMinutes) {
-      return { price: covering.price, label: covering.label };
-    }
-
-    const previousTier = this.classifyBracketTier(previous.uptoMinutes!);
-    const smaller = allFinite.filter(
-      (b) => PRICE_BRACKET_TIER_RANK[this.classifyBracketTier(b.uptoMinutes!)] < PRICE_BRACKET_TIER_RANK[previousTier],
-    );
-    if (smaller.length === 0) {
-      // No hay una escala más chica configurada en qué descomponer el excedente (ej. la franja
-      // anterior ya era de minutos) — se mantiene el comportamiento de siempre.
-      return { price: covering.price, label: covering.label };
-    }
-
-    const remainder = elapsedMinutes - previous.uptoMinutes!;
-    const sub = this.resolveLadderSubset(smaller, remainder, graceMinutes);
-    if (sub === null) {
-      // El excedente no entra ni con tolerancia en la escala más chica (ej. quedan 45 min por
-      // cobrar y la escalera de minutos solo llega a 30) — la cascada no alcanza a cubrirlo, así
-      // que se cobra directo el techo de `covering` en vez de quedar congelado en la franja
-      // anterior + el último escalón chico (que subcobraría cuanto más se acerque al próximo techo).
-      return { price: covering.price, label: covering.label };
-    }
-    return { price: previous.price + sub.price, label: `${previous.label} + ${sub.label}` };
-  }
-
-  // Igual que el ciclo principal de resolveExitPrice pero acotado a un subconjunto de franjas de
-  // una escala más chica — se usa para el excedente al escalar de minutos a horas, o de horas a
-  // días. Si el excedente supera incluso esta escalera más chica (ni con tolerancia), devuelve
-  // null para que el llamador sepa que la cascada no alcanza y tiene que cobrar el techo de arriba.
-  private resolveLadderSubset(
-    brackets: TicketPriceBracket[],
-    elapsedMinutes: number,
-    graceMinutes: number,
-  ): { price: number; label: string } | null {
-    const sorted = [...brackets].sort((a, b) => a.uptoMinutes! - b.uptoMinutes!);
-    let previous: TicketPriceBracket | null = null;
-    for (const bracket of sorted) {
-      const threshold = bracket.uptoMinutes! + graceMinutes;
-      if (elapsedMinutes <= threshold) {
-        return this.resolveBracketOrCascade(bracket, previous, elapsedMinutes, graceMinutes, sorted);
-      }
-      previous = bracket;
-    }
-    return null;
-  }
-
-  // Precio por bloque de una franja recurrente. En orden:
-  // 1) Coincidencia exacta: el "cada X" coincide con el "hasta" de otra franja ya cargada -> se
-  //    usa el precio de ESA franja tal cual (ej. "cada 1 hora" = "hasta 1 hora").
-  // 2) Si no hay coincidencia exacta, se deriva proporcionalmente de la franja más chica de una
-  //    escala más GRANDE que haya cargada (ej. "cada 1 minuto" sin una franja "hasta 1 min" toma
-  //    el precio de "hasta 1 hora" dividido por 60) — nunca de una escala más chica, no tendría
-  //    sentido calcular un precio por hora en base a una franja de minutos.
-  // 3) Si no hay ninguna franja de una escala más grande cargada, se usa el precio propio que se
-  //    cargó a mano en esta franja (comportamiento de siempre) — nunca se bloquea el cobro.
-  private resolveRecurringUnitPrice(recurringUnitMinutes: number, finite: TicketPriceBracket[]): number | null {
-    const exact = finite.find((b) => b.uptoMinutes === recurringUnitMinutes);
-    if (exact) return exact.price;
-
-    const tier = this.classifyBracketTier(recurringUnitMinutes);
-    const biggerTiers: PriceBracketTier[] = tier === 'MIN' ? ['HOUR', 'DAY'] : tier === 'HOUR' ? ['DAY'] : [];
-
-    for (const biggerTier of biggerTiers) {
-      const anchor = finite
-        .filter((b) => this.classifyBracketTier(b.uptoMinutes!) === biggerTier)
-        .sort((a, b) => a.uptoMinutes! - b.uptoMinutes!)[0];
-      if (anchor) {
-        return Math.round((anchor.price / anchor.uptoMinutes!) * recurringUnitMinutes);
-      }
-    }
-
-    return null;
-  }
-
-  // Si la franja es de tarifa recurrente (sin límite + recurringUnitMinutes seteado), el precio
-  // es ACUMULATIVO: se cobra el precio de la última franja con techo (si hay una antes) más un
-  // monto por cada bloque de recurringUnitMinutes que pasó DESDE ese punto en adelante — no se
-  // recalcula el tiempo total desde cero. Si no hay franja anterior, cuenta desde el minuto 0.
-  // Sin recurringUnitMinutes, es un monto fijo único como cualquier franja.
-  private priceBracketAmount(
-    bracket: TicketPriceBracket,
-    elapsedMinutes: number,
-    previous: TicketPriceBracket | null,
-    finite: TicketPriceBracket[] = [],
-  ): { price: number; label: string } {
-    if (bracket.uptoMinutes !== null || !bracket.recurringUnitMinutes) {
-      return { price: bracket.price, label: bracket.label };
-    }
-    const unitPrice = this.resolveRecurringUnitPrice(bracket.recurringUnitMinutes, finite) ?? bracket.price;
-
-    const baseMinutes = previous?.uptoMinutes ?? 0;
-    const basePrice = previous?.price ?? 0;
-    const overageMinutes = Math.max(0, elapsedMinutes - baseMinutes);
-    const units = Math.max(1, Math.ceil(overageMinutes / bracket.recurringUnitMinutes));
-    const total = basePrice + unitPrice * units;
-    const label = previous
-      ? `${bracket.label} ($${basePrice} + ${units} × $${unitPrice})`
-      : `${bracket.label} (${units} × $${unitPrice})`;
-    return { price: total, label };
-  }
-
-  // Solo puede haber una franja "sin límite" por vehículo + horario — resolveExitPrice usa la
-  // PRIMERA que encuentra (`brackets.find`), así que una segunda quedaría cargada sin que se
-  // use nunca para cobrar. Un horario "cualquiera" (ticketDayType null) cubre día y noche, así
-  // que también choca con una franja específica de esa combinación.
+  // Solo puede haber una franja "sin límite" por vehículo + horario en el alta/edición suelta de
+  // franjas (POST/PATCH priceBrackets). El editor de tarifas (TariffPlanService) valida el plan
+  // entero y sí permite una regla general junto con una de día o de noche, que la reemplaza en
+  // ese horario.
   private async findOpenEndedBracketConflict(
     vehicleType: string,
     ticketDayType: string | null,
@@ -867,15 +738,14 @@ async updateRegistration(existingRegistration: TicketRegistration, formattedDay:
       }
 
       const argentinaTime = dayjs().tz('America/Argentina/Buenos_Aires');
-      // Minutos desde la entrada (usa entryDay + entryTime juntos, no solo la hora, para que
-      // una estadía que cruza la medianoche o dura varios días se calcule bien).
-      const minutesPassed = argentinaTime.diff(entryAt, 'minute');
-
-      const ticketDayType = await this.resolveCurrentTicketDayType();
-      const { price: finalPrice, label: bracketLabel, usedFallback } = await this.resolveExitPrice(
+      // Se usa entryDay + entryTime juntos, no solo la hora, para que una estadía que cruza la
+      // medianoche o dura varios días se calcule bien. Una entrada con hora "futura" (reloj
+      // corrido) se cobra como estadía de 0 minutos en vez de bloquear la salida.
+      const exitAt = argentinaTime.isBefore(entryAt) ? entryAt : argentinaTime;
+      const { price: finalPrice, label: bracketLabel, usedFallback, ticketDayType } = await this.resolveExitPrice(
         ticket.vehicleType,
-        ticketDayType,
-        minutesPassed,
+        entryAt.toDate(),
+        exitAt.toDate(),
       );
 
       // Si ya se cobró un anticipo sobre esta entrada, a caja solo entra la diferencia

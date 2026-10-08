@@ -16,11 +16,16 @@ import { UpdateTicketPriceBracketDto } from './dto/update-ticket-price-bracket.d
 import { UpdateTicketScheduleDto } from './dto/update-ticket-schedule.dto';
 import { AddAdvancePaymentDto } from './dto/add-advance-payment.dto';
 import { SetPaymentMethodDto } from './dto/set-payment-method.dto';
+import { SimulateTariffPlanDto, UpdateTariffPlanDto } from './dto/tariff-plan.dto';
+import { TariffPlanService } from './tariff-plan.service';
 
 @Controller('tickets')
 @UseGuards(AuthOrTokenAuthGuard)
 export class TicketsController {
-  constructor(private readonly ticketsService: TicketsService) {}
+  constructor(
+    private readonly ticketsService: TicketsService,
+    private readonly tariffPlanService: TariffPlanService,
+  ) {}
 
   // Declaradas antes de las rutas con ":id" — si no, Nest/Express matchea
   // "schedule-settings" como si fuera un :id de ticket.
@@ -32,6 +37,24 @@ export class TicketsController {
   @Patch('schedule-settings')
   updateSchedule(@Body() updateTicketScheduleDto: UpdateTicketScheduleDto) {
     return this.ticketsService.updateSchedule(updateTicketScheduleDto);
+  }
+
+  // Editor de tarifas por tiempo: lee y aplica el plan completo (forma de cobro, horarios y
+  // precios) de una vez, con control de revisión para no pisar cambios de otra persona.
+  @Get('tariff-plan')
+  getTariffPlan() {
+    return this.tariffPlanService.getPlan();
+  }
+
+  @Patch('tariff-plan')
+  updateTariffPlan(@Body() dto: UpdateTariffPlanDto) {
+    return this.tariffPlanService.updatePlan(dto);
+  }
+
+  // Calcula un ejemplo sin registrar nada, con las tarifas vigentes o con un borrador.
+  @Post('tariff-plan/simulate')
+  simulateTariffPlan(@Body() dto: SimulateTariffPlanDto) {
+    return this.tariffPlanService.simulate(dto);
   }
 
   @Post()
