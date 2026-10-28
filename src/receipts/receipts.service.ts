@@ -11,12 +11,10 @@ import { UpdateReceiptDto } from './dto/update-receipt.dto';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
-import isBetween from 'dayjs/plugin/isBetween';
-import 'dayjs/locale/es';
+import isBetween from 'dayjs/plugin/isBetween'; 
 import { LessThan } from "typeorm";
 import { ReceiptPayment } from './entities/receipt-payment.entity';
 import { PaymentHistoryOnAccount } from './entities/payment-history-on-account.entity';
-import { allocatePrivatePayment } from './private-owner-allocation';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -38,49 +36,6 @@ export class ReceiptsService {
         private readonly boxListsService: BoxListsService,
         private readonly dataSource: DataSource,
     ) {}
-
-    async getReceiptsSummary(from?: string, to?: string) {
-      try {
-        const argentinaNow = dayjs().tz('America/Argentina/Buenos_Aires');
-        const rangeFrom = from ?? argentinaNow.startOf('month').format('YYYY-MM-DD');
-        const rangeTo = to ?? argentinaNow.format('YYYY-MM-DD');
-
-        const byStatusRows = await this.receiptRepository
-          .createQueryBuilder('receipt')
-          .select('receipt.status', 'status')
-          .addSelect('COUNT(*)', 'count')
-          .addSelect('SUM(receipt.price)', 'total')
-          .where('receipt.dateNow BETWEEN :from AND :to', { from: rangeFrom, to: rangeTo })
-          .groupBy('receipt.status')
-          .getRawMany();
-
-        // La forma de pago real vive en ReceiptPayment (un recibo puede tener varios
-        // pagos parciales con distinto medio) — Receipt.paymentType casi nunca se completa.
-        const byPaymentTypeRows = await this.receiptPaymentRepository
-          .createQueryBuilder('rp')
-          .select('rp.paymentType', 'paymentType')
-          .addSelect('COUNT(*)', 'count')
-          .addSelect('SUM(rp.price)', 'total')
-          .where('rp.paymentDate BETWEEN :from AND :to', { from: rangeFrom, to: rangeTo })
-          .andWhere('rp.paymentType IS NOT NULL')
-          .groupBy('rp.paymentType')
-          .getRawMany();
-
-        return {
-          from: rangeFrom,
-          to: rangeTo,
-          byStatus: byStatusRows.map((r) => ({ status: r.status as string, count: Number(r.count), total: Number(r.total) })),
-          byPaymentType: byPaymentTypeRows.map((r) => ({
-            paymentType: r.paymentType as string | null,
-            count: Number(r.count),
-            total: Number(r.total),
-          })),
-        };
-      } catch (error: any) {
-        this.logger.error(error.message, error.stack);
-        throw error;
-      }
-    }
 
 async createReceipt(customerId: string, manager: EntityManager, price?: number, dateNow?: string, dateNowForDebt?: string): Promise<Receipt> {
   try {
@@ -221,24 +176,6 @@ async updateReceipt(
   };
 
   // =========================================================
-  // ✅ Helper: lo que sobra del pago del PRIVATE pasa al crédito del OWNER
-  //    El monto queda anotado en el recibo del PRIVATE (ownerCreditGranted) para
-  //    poder revertirlo si se cancela. En la planilla sigue figurando como entrada
-  //    del PRIVATE: cuando el owner use el crédito, ese pago CREDIT no suma a caja.
-  // =========================================================
-  const grantOwnerCredit = async (
-    ownerId: string | null | undefined,
-    amount: number,
-    privateReceipt: Receipt,
-    customer: Customer,
-  ) => {
-    if (!ownerId || amount <= 0) return;
-    await queryRunner.manager.increment(Customer, { id: ownerId }, "credit", amount);
-    privateReceipt.ownerCreditGranted = (privateReceipt.ownerCreditGranted ?? 0) + amount;
-    logPrivate(customer, "Sobrante acreditado al OWNER", { ownerId, amount });
-  };
-
-  // =========================================================
   // ✅ FUNCIÓN APARTE:
   //    Compensa PRIVATE -> OWNER (FIFO, parcial, numberInBox)
   // =========================================================
@@ -252,9 +189,6 @@ async updateReceipt(
 
     paymentTypeForOwner: "MIX" | "TP";
 
-    // recibo del PRIVATE que se está pagando (anota el crédito dado al owner)
-    privateReceipt: Receipt;
-
     // ✅ para logs
     customer: Customer;
     ownerId?: string | null;
@@ -266,7 +200,6 @@ async updateReceipt(
       privatePaymentsCreated,
       ownerPendingReceipts,
       paymentTypeForOwner,
-      privateReceipt,
       customer,
       ownerId,
     } = args;
@@ -293,47 +226,53 @@ async updateReceipt(
       return;
     }
 
+    if (!ownerPendingReceipts?.length) {
+      logPrivate(customer, "Owner no tiene pendings => numberInBox del private = price");
+      for (const p of privatePaymentsCreated) {
+        p.numberInBox = Number(p.price ?? 0);
+      }
+      if (privatePaymentsCreated.length) await queryRunner.manager.save(privatePaymentsCreated);
+      return;
+    }
+
     const privateTotalPaid = privatePaymentsCreated.reduce(
       (sum, p) => sum + Number(p.price ?? 0),
       0
     );
 
-    if (!ownerPendingReceipts?.length) {
-      logPrivate(customer, "Owner no tiene pendings => numberInBox del private = price, todo al crédito del owner");
-      for (const p of privatePaymentsCreated) {
-        p.numberInBox = Number(p.price ?? 0);
-      }
-      if (privatePaymentsCreated.length) await queryRunner.manager.save(privatePaymentsCreated);
-      await grantOwnerCredit(ownerId, privateTotalPaid, privateReceipt, customer);
-      return;
-    }
-
-    // FIFO sobre todas las deudas del owner; lo que sobra después de saldarlas es su crédito.
-    const { applied, credit: privateLeftover } = allocatePrivatePayment(
-      privateTotalPaid,
-      ownerPendingReceipts.map((r) => Number(r.price ?? 0)),
+    const ownerTotalDebt = ownerPendingReceipts.reduce(
+      (sum, r) => sum + Number(r.price ?? 0),
+      0
     );
+
+    let toAllocateToOwner = Math.min(privateTotalPaid, ownerTotalDebt);
+    const privateLeftover = Math.max(0, privateTotalPaid - toAllocateToOwner);
 
     logPrivate(customer, "Cálculos iniciales", {
       privateTotalPaid,
-      applied,
+      ownerTotalDebt,
+      toAllocateToOwner,
       privateLeftover,
       ownerPendingMonths: ownerPendingReceipts.map(r => String(r.startDate).slice(0, 7)),
     });
 
     await distributeLeftoverAcrossPrivatePayments(privatePaymentsCreated, privateLeftover);
 
-    for (const [index, ownerReceipt] of ownerPendingReceipts.entries()) {
-      const apply = applied[index];
-      if (apply <= 0) continue;
+    for (const ownerReceipt of ownerPendingReceipts) {
+      if (toAllocateToOwner <= 0) break;
 
       const ownerCurrentDebt = Number(ownerReceipt.price ?? 0);
+      if (ownerCurrentDebt <= 0) continue;
+
+      const apply = Math.min(ownerCurrentDebt, toAllocateToOwner);
+      toAllocateToOwner -= apply;
 
       logPrivate(customer, "Aplicando al OWNER (FIFO)", {
         ownerReceiptId: ownerReceipt.id,
         ownerReceiptMonth: String(ownerReceipt.startDate).slice(0, 7),
         ownerCurrentDebt,
         apply,
+        remainingToAllocate: toAllocateToOwner,
       });
 
       const ownerPayment = this.receiptPaymentRepository.create({
@@ -371,8 +310,6 @@ async updateReceipt(
       await queryRunner.manager.save(ownerReceipt);
     }
 
-    await grantOwnerCredit(ownerId, privateLeftover, privateReceipt, customer);
-
     logPrivate(customer, "Fin applyPrivateOwnerCompensation()", {
       leftoverPrivate: privateLeftover,
     });
@@ -398,28 +335,6 @@ async updateReceipt(
 
     if (!receipt) throw new NotFoundException("Receipt not found");
     if (receipt.status === "PAID") throw new BadRequestException("Receipt already paid");
-
-    // No se puede pagar un mes salteando deudas más viejas del mismo cliente — si septiembre
-    // se intenta pagar con agosto todavía pendiente, cortamos acá antes de tocar caja/compensación.
-    const olderPendingReceipts = await queryRunner.manager.find(Receipt, {
-      where: {
-        customer: { id: customerId },
-        status: "PENDING",
-        id: Not(receipt.id),
-        startDate: Raw((alias) => `${alias} < :receiptStart`, { receiptStart: receipt.startDate }),
-      },
-      order: { startDate: "ASC" },
-    });
-
-    if (olderPendingReceipts.length > 0) {
-      const monthLabels = olderPendingReceipts.map((r) => {
-        const label = dayjs(r.startDate).locale("es").format("MMMM YYYY");
-        return label.charAt(0).toUpperCase() + label.slice(1);
-      });
-      throw new BadRequestException(
-        `No se puede pagar este recibo: hay deudas anteriores sin pagar (${monthLabels.join(", ")}). Pagalas primero.`,
-      );
-    }
 
     const argentinaTime = dayjs().tz("America/Argentina/Buenos_Aires").startOf("day");
     const now = argentinaTime.format("YYYY-MM-DD");
@@ -465,14 +380,14 @@ async updateReceipt(
       });
 
       if (owner) {
-        // Todas las deudas del owner, de la más vieja a la más nueva: el pago del PRIVATE las
-        // va saldando en ese orden y recién lo que sobra pasa a su crédito.
         const ownerPendings = await queryRunner.manager.find(Receipt, {
           where: {
             customer: { id: owner.id },
             status: "PENDING",
+            startDate: Raw((alias) => `${alias} < :limit`, { limit: privateNextMonthStartStr }),
           },
           order: { startDate: "ASC" },
+          take: 2,
         });
 
         ownerPendingReceiptsToAutoPay = ownerPendings ?? [];
@@ -647,8 +562,7 @@ async updateReceipt(
         });
       }
 
-      // Con owner relacionado siempre se compensa: aunque no deba nada, el pago es suyo y va a su crédito.
-      if (customer.customerType === "PRIVATE" && ownerToLink) {
+      if (customer.customerType === "PRIVATE" && ownerPendingReceiptsToAutoPay.length > 0) {
         const privatePaidInCash = updateReceiptDto.payments.some((p) => p.paymentType === "CASH");
         const paymentTypeForOwner = privatePaidInCash ? "MIX" : "TP";
 
@@ -659,7 +573,6 @@ async updateReceipt(
           privatePaymentsCreated: privatePaymentsCreatedForCompensation,
           ownerPendingReceipts: ownerPendingReceiptsToAutoPay,
           paymentTypeForOwner,
-          privateReceipt: receipt,
 
           customer,
           ownerId: ownerToLink?.id ?? null,
@@ -724,11 +637,6 @@ async updateReceipt(
             newPrice: r.price,
           });
         }
-
-        // Igual que en el pago completo: lo que sobra después de saldar al owner es su crédito
-        // (un pago FIX no es plata recibida, así que no genera crédito).
-        const onAccountHasFIX = updateReceiptDto.payments.some((p) => p.paymentType === "FIX");
-        if (!onAccountHasFIX) await grantOwnerCredit(ownerToLink.id, remaining, receipt, customer);
       }
 
       for (const payment of updateReceiptDto.payments) {
@@ -814,7 +722,6 @@ async updateReceipt(
         price: receipt.price,
         status: receipt.status,
         paymentDate: receipt.paymentDate,
-        ownerCreditGranted: receipt.ownerCreditGranted ?? 0,
       }
     );
 
@@ -887,26 +794,6 @@ async cancelReceipt(receiptId: string, customerId: string) {
     }
 
     if (!lastPaidReceipt) throw new NotFoundException("Receipt not found");
-
-    // ✅ Si el pago del PRIVATE dejó crédito al owner, se le descuenta. Si el owner ya lo usó
-    //    no alcanza para revertirlo: hay que cancelar primero ese pago del owner.
-    const grantedOwnerCredit =
-      customer.customerType === "PRIVATE" ? Number(lastPaidReceipt.ownerCreditGranted ?? 0) : 0;
-    const creditOwner = customer.vehicleRenters?.[0]?.vehicle?.customer;
-    if (grantedOwnerCredit > 0 && creditOwner) {
-      const ownerNow = await customerRepo.findOne({
-        where: { id: creditOwner.id },
-        lock: { mode: "pessimistic_write" },
-      });
-      const ownerCredit = Number(ownerNow?.credit ?? 0);
-      if (ownerCredit < grantedOwnerCredit) {
-        throw new BadRequestException(
-          `No se puede cancelar: este pago le acreditó $${grantedOwnerCredit} al propietario y ya usó parte de ese crédito. Cancelá primero el pago del propietario que lo usó.`,
-        );
-      }
-      await customerRepo.update({ id: creditOwner.id }, { credit: ownerCredit - grantedOwnerCredit });
-      lastPaidReceipt.ownerCreditGranted = 0;
-    }
 
     // ✅ guardamos la fecha antes de resetear (la usamos para buscar los pagos del owner)
     const receiptDate = lastPaidReceipt.paymentDate;
@@ -1142,29 +1029,32 @@ async createReceiptMan(dateNowFront: string, customerType: CustomerType): Promis
 
 
 
-    // A pesar del nombre (histórico — lo usa drop-menu-actions.tsx para chequear "¿ya se
-    // generaron recibos este mes?"), esto tiene que traer TODOS los recibos del tipo de cliente,
-    // no solo los PENDING: los diálogos de exportar (Clientes/Recibos) filtran por "pagó / no
-    // pagó" del lado del cliente, así que si acá ya se descartan los pagados, ese filtro nunca
-    // puede mostrar nada como pagado y un recibo ya cobrado desaparece como si no existiera.
-    // Antes además se armaba recorriendo `customer.receipts`, que no deja el `receipt.customer`
-    // cargado — cualquier lectura de `receipt.customer.*` del lado del cliente rompía o, con la
-    // guarda defensiva agregada ahí, descartaba en silencio recibos que sí existían.
     async findAllPendingReceipts(customerType: CustomerType) {
       try {
-        const receipts = await this.receiptRepository.find({
-          where: { customer: { customerType } },
-          relations: [
-            'customer',
-            'customer.vehicleRenters',
-            'customer.vehicleRenters.vehicle',
-            'customer.vehicleRenters.vehicle.customer',
-          ],
-          withDeleted: true,
-          order: { createdAt: 'DESC' },
+        const customers = await this.customerRepository.find({
+          where: { customerType: customerType },
+          relations: ['receipts'],
+          withDeleted: true
         });
-
-        return receipts;
+    
+        // Array para almacenar los recibos pendientes de todos los clientes
+        const pendingReceipts = [];
+    
+        for (const customer of customers) {
+          const receipts = customer.receipts.sort(
+            (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+          );
+    
+          // Filtrar solo los recibos con estado 'PENDING'
+          const customerPendingReceipts = receipts.filter(
+            (receipt) => receipt.status === 'PENDING'
+          );
+    
+          // Agregar los recibos pendientes al array general
+          pendingReceipts.push(...customerPendingReceipts);
+        }
+    
+        return pendingReceipts;
       } catch (error: any) {
         if (!(error instanceof NotFoundException)) {
           this.logger.error(error.message, error.stack);
@@ -1199,13 +1089,9 @@ async createReceiptMan(dateNowFront: string, customerType: CustomerType): Promis
       }
     }
 
-    async findReceipts(from?: string, to?: string){
+    async findReceipts(){
       try{
-        const receipts = await this.receiptRepository.find({
-          where: from && to ? { dateNow: Raw((alias) => `${alias} BETWEEN :from AND :to`, { from, to }) } : {},
-          relations: ['payments', 'customer','customer.vehicleRenters', 'customer.vehicleRenters.vehicle', 'customer.vehicleRenters.vehicle.customer'],
-          order: { dateNow: 'DESC' },
-        })
+        const receipts = await this.receiptRepository.find({relations: ['payments', 'customer','customer.vehicleRenters', 'customer.vehicleRenters.vehicle', 'customer.vehicleRenters.vehicle.customer']})
 
         return receipts;
       } catch (error: any) {
