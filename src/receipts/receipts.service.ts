@@ -16,6 +16,7 @@ import 'dayjs/locale/es';
 import { LessThan } from "typeorm";
 import { ReceiptPayment } from './entities/receipt-payment.entity';
 import { PaymentHistoryOnAccount } from './entities/payment-history-on-account.entity';
+import { allocatePrivatePayment } from './private-owner-allocation';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -220,6 +221,24 @@ async updateReceipt(
   };
 
   // =========================================================
+  // ✅ Helper: lo que sobra del pago del PRIVATE pasa al crédito del OWNER
+  //    El monto queda anotado en el recibo del PRIVATE (ownerCreditGranted) para
+  //    poder revertirlo si se cancela. En la planilla sigue figurando como entrada
+  //    del PRIVATE: cuando el owner use el crédito, ese pago CREDIT no suma a caja.
+  // =========================================================
+  const grantOwnerCredit = async (
+    ownerId: string | null | undefined,
+    amount: number,
+    privateReceipt: Receipt,
+    customer: Customer,
+  ) => {
+    if (!ownerId || amount <= 0) return;
+    await queryRunner.manager.increment(Customer, { id: ownerId }, "credit", amount);
+    privateReceipt.ownerCreditGranted = (privateReceipt.ownerCreditGranted ?? 0) + amount;
+    logPrivate(customer, "Sobrante acreditado al OWNER", { ownerId, amount });
+  };
+
+  // =========================================================
   // ✅ FUNCIÓN APARTE:
   //    Compensa PRIVATE -> OWNER (FIFO, parcial, numberInBox)
   // =========================================================
@@ -233,6 +252,9 @@ async updateReceipt(
 
     paymentTypeForOwner: "MIX" | "TP";
 
+    // recibo del PRIVATE que se está pagando (anota el crédito dado al owner)
+    privateReceipt: Receipt;
+
     // ✅ para logs
     customer: Customer;
     ownerId?: string | null;
@@ -244,6 +266,7 @@ async updateReceipt(
       privatePaymentsCreated,
       ownerPendingReceipts,
       paymentTypeForOwner,
+      privateReceipt,
       customer,
       ownerId,
     } = args;
@@ -270,53 +293,47 @@ async updateReceipt(
       return;
     }
 
-    if (!ownerPendingReceipts?.length) {
-      logPrivate(customer, "Owner no tiene pendings => numberInBox del private = price");
-      for (const p of privatePaymentsCreated) {
-        p.numberInBox = Number(p.price ?? 0);
-      }
-      if (privatePaymentsCreated.length) await queryRunner.manager.save(privatePaymentsCreated);
-      return;
-    }
-
     const privateTotalPaid = privatePaymentsCreated.reduce(
       (sum, p) => sum + Number(p.price ?? 0),
       0
     );
 
-    const ownerTotalDebt = ownerPendingReceipts.reduce(
-      (sum, r) => sum + Number(r.price ?? 0),
-      0
-    );
+    if (!ownerPendingReceipts?.length) {
+      logPrivate(customer, "Owner no tiene pendings => numberInBox del private = price, todo al crédito del owner");
+      for (const p of privatePaymentsCreated) {
+        p.numberInBox = Number(p.price ?? 0);
+      }
+      if (privatePaymentsCreated.length) await queryRunner.manager.save(privatePaymentsCreated);
+      await grantOwnerCredit(ownerId, privateTotalPaid, privateReceipt, customer);
+      return;
+    }
 
-    let toAllocateToOwner = Math.min(privateTotalPaid, ownerTotalDebt);
-    const privateLeftover = Math.max(0, privateTotalPaid - toAllocateToOwner);
+    // FIFO sobre todas las deudas del owner; lo que sobra después de saldarlas es su crédito.
+    const { applied, credit: privateLeftover } = allocatePrivatePayment(
+      privateTotalPaid,
+      ownerPendingReceipts.map((r) => Number(r.price ?? 0)),
+    );
 
     logPrivate(customer, "Cálculos iniciales", {
       privateTotalPaid,
-      ownerTotalDebt,
-      toAllocateToOwner,
+      applied,
       privateLeftover,
       ownerPendingMonths: ownerPendingReceipts.map(r => String(r.startDate).slice(0, 7)),
     });
 
     await distributeLeftoverAcrossPrivatePayments(privatePaymentsCreated, privateLeftover);
 
-    for (const ownerReceipt of ownerPendingReceipts) {
-      if (toAllocateToOwner <= 0) break;
+    for (const [index, ownerReceipt] of ownerPendingReceipts.entries()) {
+      const apply = applied[index];
+      if (apply <= 0) continue;
 
       const ownerCurrentDebt = Number(ownerReceipt.price ?? 0);
-      if (ownerCurrentDebt <= 0) continue;
-
-      const apply = Math.min(ownerCurrentDebt, toAllocateToOwner);
-      toAllocateToOwner -= apply;
 
       logPrivate(customer, "Aplicando al OWNER (FIFO)", {
         ownerReceiptId: ownerReceipt.id,
         ownerReceiptMonth: String(ownerReceipt.startDate).slice(0, 7),
         ownerCurrentDebt,
         apply,
-        remainingToAllocate: toAllocateToOwner,
       });
 
       const ownerPayment = this.receiptPaymentRepository.create({
@@ -353,6 +370,8 @@ async updateReceipt(
 
       await queryRunner.manager.save(ownerReceipt);
     }
+
+    await grantOwnerCredit(ownerId, privateLeftover, privateReceipt, customer);
 
     logPrivate(customer, "Fin applyPrivateOwnerCompensation()", {
       leftoverPrivate: privateLeftover,
@@ -446,14 +465,14 @@ async updateReceipt(
       });
 
       if (owner) {
+        // Todas las deudas del owner, de la más vieja a la más nueva: el pago del PRIVATE las
+        // va saldando en ese orden y recién lo que sobra pasa a su crédito.
         const ownerPendings = await queryRunner.manager.find(Receipt, {
           where: {
             customer: { id: owner.id },
             status: "PENDING",
-            startDate: Raw((alias) => `${alias} < :limit`, { limit: privateNextMonthStartStr }),
           },
           order: { startDate: "ASC" },
-          take: 2,
         });
 
         ownerPendingReceiptsToAutoPay = ownerPendings ?? [];
@@ -628,7 +647,8 @@ async updateReceipt(
         });
       }
 
-      if (customer.customerType === "PRIVATE" && ownerPendingReceiptsToAutoPay.length > 0) {
+      // Con owner relacionado siempre se compensa: aunque no deba nada, el pago es suyo y va a su crédito.
+      if (customer.customerType === "PRIVATE" && ownerToLink) {
         const privatePaidInCash = updateReceiptDto.payments.some((p) => p.paymentType === "CASH");
         const paymentTypeForOwner = privatePaidInCash ? "MIX" : "TP";
 
@@ -639,6 +659,7 @@ async updateReceipt(
           privatePaymentsCreated: privatePaymentsCreatedForCompensation,
           ownerPendingReceipts: ownerPendingReceiptsToAutoPay,
           paymentTypeForOwner,
+          privateReceipt: receipt,
 
           customer,
           ownerId: ownerToLink?.id ?? null,
@@ -703,6 +724,11 @@ async updateReceipt(
             newPrice: r.price,
           });
         }
+
+        // Igual que en el pago completo: lo que sobra después de saldar al owner es su crédito
+        // (un pago FIX no es plata recibida, así que no genera crédito).
+        const onAccountHasFIX = updateReceiptDto.payments.some((p) => p.paymentType === "FIX");
+        if (!onAccountHasFIX) await grantOwnerCredit(ownerToLink.id, remaining, receipt, customer);
       }
 
       for (const payment of updateReceiptDto.payments) {
@@ -788,6 +814,7 @@ async updateReceipt(
         price: receipt.price,
         status: receipt.status,
         paymentDate: receipt.paymentDate,
+        ownerCreditGranted: receipt.ownerCreditGranted ?? 0,
       }
     );
 
@@ -860,6 +887,26 @@ async cancelReceipt(receiptId: string, customerId: string) {
     }
 
     if (!lastPaidReceipt) throw new NotFoundException("Receipt not found");
+
+    // ✅ Si el pago del PRIVATE dejó crédito al owner, se le descuenta. Si el owner ya lo usó
+    //    no alcanza para revertirlo: hay que cancelar primero ese pago del owner.
+    const grantedOwnerCredit =
+      customer.customerType === "PRIVATE" ? Number(lastPaidReceipt.ownerCreditGranted ?? 0) : 0;
+    const creditOwner = customer.vehicleRenters?.[0]?.vehicle?.customer;
+    if (grantedOwnerCredit > 0 && creditOwner) {
+      const ownerNow = await customerRepo.findOne({
+        where: { id: creditOwner.id },
+        lock: { mode: "pessimistic_write" },
+      });
+      const ownerCredit = Number(ownerNow?.credit ?? 0);
+      if (ownerCredit < grantedOwnerCredit) {
+        throw new BadRequestException(
+          `No se puede cancelar: este pago le acreditó $${grantedOwnerCredit} al propietario y ya usó parte de ese crédito. Cancelá primero el pago del propietario que lo usó.`,
+        );
+      }
+      await customerRepo.update({ id: creditOwner.id }, { credit: ownerCredit - grantedOwnerCredit });
+      lastPaidReceipt.ownerCreditGranted = 0;
+    }
 
     // ✅ guardamos la fecha antes de resetear (la usamos para buscar los pagos del owner)
     const receiptDate = lastPaidReceipt.paymentDate;
