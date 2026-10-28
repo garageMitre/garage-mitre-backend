@@ -1089,9 +1089,15 @@ async createReceiptMan(dateNowFront: string, customerType: CustomerType): Promis
       }
     }
 
-    async findReceipts(){
+    // Con from/to (YYYY-MM-DD) devuelve solo los recibos de ese período según su dateNow: la
+    // página de métricas de clientes pide un mes por vez en vez de traer todo el historial.
+    async findReceipts(from?: string, to?: string){
       try{
-        const receipts = await this.receiptRepository.find({relations: ['payments', 'customer','customer.vehicleRenters', 'customer.vehicleRenters.vehicle', 'customer.vehicleRenters.vehicle.customer']})
+        const receipts = await this.receiptRepository.find({
+          where: from && to ? { dateNow: Raw((alias) => `${alias} BETWEEN :from AND :to`, { from, to }) } : {},
+          relations: ['payments', 'customer','customer.vehicleRenters', 'customer.vehicleRenters.vehicle', 'customer.vehicleRenters.vehicle.customer'],
+          order: { dateNow: 'DESC' },
+        })
 
         return receipts;
       } catch (error: any) {
