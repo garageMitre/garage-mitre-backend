@@ -55,6 +55,37 @@ export class CustomersService {
       private readonly dataSource: DataSource,
     ) {}
 
+    async getCustomersSummary(from?: string, to?: string) {
+      try {
+        const argentinaNow = dayjs().tz('America/Argentina/Buenos_Aires');
+        const rangeFrom = from ?? argentinaNow.startOf('month').format('YYYY-MM-DD');
+        const rangeTo = to ?? argentinaNow.format('YYYY-MM-DD');
+
+        // Se pasan strings ISO (no objetos Date) como parámetros: el driver pg serializa
+        // objetos Date usando la zona horaria local del proceso en vez de UTC al compararlos
+        // contra una columna timestamp sin tz, lo que corría el límite superior del rango.
+        const rangeStart = dayjs.tz(rangeFrom, 'America/Argentina/Buenos_Aires').startOf('day').toISOString();
+        const rangeEnd = dayjs.tz(rangeTo, 'America/Argentina/Buenos_Aires').endOf('day').toISOString();
+
+        const rows = await this.customerRepository
+          .createQueryBuilder('customer')
+          .select('customer.customerType', 'customerType')
+          .addSelect('COUNT(*)', 'count')
+          .where('customer.createdAt BETWEEN :from AND :to', { from: rangeStart, to: rangeEnd })
+          .groupBy('customer.customerType')
+          .getRawMany();
+
+        return {
+          from: rangeFrom,
+          to: rangeTo,
+          byCustomerType: rows.map((r) => ({ customerType: r.customerType as CustomerType, count: Number(r.count) })),
+        };
+      } catch (error: any) {
+        this.logger.error(error.message, error.stack);
+        throw error;
+      }
+    }
+
     async create(createCustomerDto: CreateCustomerDto) {
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();

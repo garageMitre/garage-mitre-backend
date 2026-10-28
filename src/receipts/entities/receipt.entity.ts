@@ -56,6 +56,12 @@ export class Receipt {
   @Column('varchar', { nullable: true })
   receiptTypeKey: string;
 
+  // Solo en recibos de inquilinos de terceros (PRIVATE): cuánto de lo que pagó pasó al crédito
+  // del propietario porque sobró después de saldar sus deudas. Se guarda para poder revertirlo
+  // exactamente si se cancela el pago.
+  @Column('int', { default: 0 })
+  ownerCreditGranted: number;
+
   @ManyToOne(() => Customer, (customer) => customer.receipts, { onDelete: 'CASCADE' })
   @JoinColumn()
   customer: Customer;
