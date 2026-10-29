@@ -27,7 +27,10 @@ export class TicketRegistrationForDay {
 
   @Column('int', {nullable:true})
   days: number;
-  
+
+  @Column('int', {nullable:true})
+  months: number;
+
   @Column('date', { nullable: true })
   dateNow: string | null;
 
@@ -51,6 +54,11 @@ export class TicketRegistrationForDay {
 
   @Column('boolean', { nullable: true })
   retired: boolean;
+
+  // Cómo se cobró — se puede cargar al crear el ticket (si ya pagó) o al registrar la salida
+  // (si el pago quedó pendiente hasta ese momento).
+  @Column('varchar', { length: 20, nullable: true })
+  paymentMetodo: 'CASH' | 'TRANSFER' | null;
 
   @ManyToOne(() => BoxList, (boxList) => boxList.ticketRegistrationForDays, {onDelete: 'CASCADE'})
   boxList: BoxList;
